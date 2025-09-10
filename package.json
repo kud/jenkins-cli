@@ -1,6 +1,6 @@
 {
   "name": "@kud/jenkins-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fast, modern Jenkins CLI + interactive TUI (status, logs, artifacts, search, stream).",
   "type": "module",
   "main": "dist/index.js",
