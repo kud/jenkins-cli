@@ -286,11 +286,6 @@ Publishing runs the build automatically via `prepublishOnly`.
 MIT
 
 ---
-### Badge Notes
-Replace the placeholder CI badge with a real GitHub Actions badge once the repository slug is public:
-```md
-![CI](https://img.shields.io/github/actions/workflow/status/ORG/REPO/ci.yml?branch=main)
-```
 
 ---
 Happy building! 🛠️
