@@ -1,283 +1,296 @@
 # Jenkins CLI (Interactive + Scriptable)
 
-A lightweight, fast, user‑focused Jenkins command line toolkit.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@kud/jenkins-cli"><img alt="npm version" src="https://img.shields.io/npm/v/%40kud%2Fjenkins-cli.svg?color=28a745" /></a>
+  <a href="https://www.npmjs.com/package/@kud/jenkins-cli"><img alt="downloads" src="https://img.shields.io/npm/dm/%40kud%2Fjenkins-cli.svg" /></a>
+  <a href="#license"><img alt="license" src="https://img.shields.io/npm/l/%40kud%2Fjenkins-cli.svg" /></a>
+  <a href="https://nodejs.org"><img alt="node version" src="https://img.shields.io/node/v/@kud/jenkins-cli.svg" /></a>
+  <!-- Replace ORG/REPO with real slug if desired -->
+  <img alt="status" src="https://img.shields.io/badge/CI-placeholder-lightgrey" />
+  <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" />
+</p>
 
-- Zero heavy dependencies (pure fetch + commander + chalk + neo-blessed)
-- Works great for both automation (JSON / plain output) and humans (colour / emojis / TUI)
-- Multi‑server config with aliases, env override, safe salvage of slightly corrupted config files
-- Rich interactive explorer: jobs panel, builds panel, live log viewer with highlighting, search, bookmarks, artifacts
-- Progressive log streaming with intelligent formatting of Docker, Git, JSON, build phases, test summaries, stack traces, URLs & file paths
-- Resilient traversal & search of large Jenkins instances (incremental BFS with safety cap)
+> Fast Jenkins terminal companion: rich interactive TUI + focused scripting commands with smart log highlighting & multi‑server profiles. Target: **Node >= 22**, pure **ESM**.
 
-> Target: modern Node (>=22). ES Modules only.
+---
+## ✨ TL;DR
+
+```bash
+# Install (global)
+npm i -g @kud/jenkins-cli
+
+# Configure once
+jenkins config set --url https://ci.example.com --user alice --token $JENKINS_TOKEN
+
+# See latest build status (pretty)
+jenkins status my-pipeline --pretty
+
+# Stream latest logs (follow)
+jenkins logs my-pipeline -f
+
+# Launch full-screen explorer (jobs | builds | logs)
+jenkins --interactive
+
+# Trigger with parameters
+jenkins build my-pipeline --param BRANCH=feature-x --param CACHE=false
+```
+
+Need JSON for scripts? Add `--json`. No icons / CI-safe? Set `JENKINS_CLI_PLAIN=1`.
+
+---
+## 📚 Table of Contents
+- [Features](#-features)
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Usage Cheat Sheet](#-usage-cheat-sheet)
+- [Interactive Explorer](#interactive-explorer)
+- [Configuration & Multi-Server](#configuration--multi-server-management)
+- [Log Highlighting Magic](#log-formatting--highlighting)
+- [Artifacts](#artifacts)
+- [Queue & Pipelines](#queue--pipeline-info)
+- [Environment Variables](#environment-variables-summary)
+- [Programmatic API](#programmatic-usage)
+- [Development & Prepublish](#prepublish--development)
+- [Why Another CLI?](#why-another-jenkins-cli)
+- [Roadmap](#roadmap-ideas)
+- [License](#license)
+
+---
+## 🚀 Features
+- **Unified experience**: quick one-liners + advanced full-screen explorer.
+- **Rich log intelligence**: Docker, Git, JSON, diffs, test summaries, timestamps, levels, artifacts & more.
+- **Multi-server profiles** with salvage of partially corrupted config.
+- **Incremental job traversal** (BFS) with a safety cap (5000) for huge Jenkins instances.
+- **Smart emoji fallback** on restricted terminals / CI.
+- **Zero heavy deps** — just `commander`, `chalk`, `neo-blessed`, `highlight.js`.
+- **Modern**: Node 22+, native fetch, ESM-first.
 
 ---
 ## Install
 
-```
-npm i -g @kud/jenkins-cli
-# or locally
+```bash
+npm i -g @kud/jenkins-cli          # Global binary
+# or project-local
 npm i -D @kud/jenkins-cli
 ```
-
-Binary name: `jenkins`
+Binary: `jenkins`
 
 ---
 ## Quick Start
 
-1. Add credentials (user + API token) and base URL once:
-
-```
+```bash
 jenkins config set --url https://ci.example.com --user alice --token $JENKINS_TOKEN
-```
-
-2. Show latest build status:
-
-```
-jenkins status my-pipeline --pretty
-```
-
-3. Tail logs of most recent build:
-
-```
-jenkins logs my-pipeline -f
-```
-
-4. Launch full interactive explorer (jobs + builds + logs):
-
-```
-jenkins --interactive
-# or explicit subcommand
-jenkins interactive
+jenkins list my-job --pretty
+jenkins logs my-job -f
+jenkins trigger my-job
+jenkins artifacts my-job 123 -p .jar -o jars/
 ```
 
 ---
-## Configuration & Multi‑Server Management
+## 🧾 Usage Cheat Sheet
 
-Stored at: `~/.config/jenkins-cli/config.json` (XDG aware via `$XDG_CONFIG_HOME`).
+| Task | Command | Notes |
+|------|---------|-------|
+| Latest build status | `jenkins status job` | Add `--pretty` for colored state + icon |
+| List builds | `jenkins list job -l 15` | Uses latest N builds |
+| Stream logs | `jenkins logs job -f` | Progressive API polling |
+| Static logs JSON | `jenkins logs job --json` | Outputs `{ text }` |
+| Trigger build | `jenkins trigger job` | Plain trigger (no params) |
+| Param build | `jenkins build job --param KEY=V --param X=Y` | Repeat flag |
+| Stop build | `jenkins stop job 456` | Aborts running build |
+| Artifacts list | `jenkins artifacts job 456` | Tab separated list |
+| Download artifacts | `jenkins artifacts job 456 -o out/` | All artifacts |
+| Filter artifacts | `jenkins artifacts job 456 -p .jar` | Simple substring |
+| Test summary | `jenkins test-report job 456` | Add `--json` for details |
+| Pipeline stages | `jenkins stages job 456` | Needs workflow-api plugin |
+| Queue list | `jenkins queue` | Items with flags |
+| Cancel queue | `jenkins queue-cancel 123` | Immediate POST |
+| Search jobs | `jenkins search api -l 200` | BFS substring matching |
+| Single-job TUI | `jenkins ui job` | Build list + logs |
+| Multi-job TUI | `jenkins interactive` | Jobs + builds + logs |
 
-Commands:
+---
+## Interactive Explorer
 
 ```
-jenkins config set --url <url> --user <user> --token <token>
-jenkins config show
-jenkins config add-server prod --url https://ci.example.com --user alice --token xxx
-jenkins config add-server staging --url https://ci.staging.example.com --user alice --token yyy
++------------------+------------------+-----------------------------------------+
+|      Jobs        |      Builds      |                 Logs                    |
+|  (filter live)   | (#  State Dur Age)|  syntax highlight / search / follow     |
++------------------+------------------+-----------------------------------------+
+|  Status / Key Hints & Active Filters / Pane Focus Indicator / Help (?)        |
++--------------------------------------------------------------------------------
+```
+
+### Key Bindings (Core)
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| `q` | Quit | `f` | Toggle follow |
+| `r` | Refresh | `S` | Toggle build sort |
+| `1/2/3` | Focus pane | `t` | Auto-refresh toggle |
+| `←/→` | Cycle panes | `a` | Artifacts popup |
+| `/` | Contextual search (jobs or logs) | `c` | Clear filters |
+| `b` | Build text filter | `B` | Build fuzzy search |
+| `m` | Bookmark line | `M` | Jump to bookmark |
+| `e/W/i` | Jump ERROR/WARN/INFO | `g/G` | Top / Bottom |
+| `l` | Toggle line numbers | `?` | Help overlay |
+
+### Focus Tricks
+- Single job mode: `jenkins interactive --jobs my-service` hides the Jobs panel for more log real estate.
+- Emojis auto-replaced in plain terminals (CI, VS Code) → textual tokens.
+
+---
+## Configuration & Multi-Server Management
+Location: `~/.config/jenkins-cli/config.json` (respects `$XDG_CONFIG_HOME`).
+
+```bash
+# Primary server
+jenkins config set --url https://ci.example.com --user alice --token $TOKEN
+
+# Multiple servers
+jenkins config add-server prod    --url https://ci.example.com        --user alice --token $TOKEN_PROD
+jenkins config add-server staging --url https://ci.staging.example.com --user alice --token $TOKEN_STG
 jenkins config use staging
 jenkins config list-servers
-jenkins config remove-server staging
 ```
 
-Environment variable overrides (take precedence when non-empty):
-- `JENKINS_URL`
-- `JENKINS_USER`
-- `JENKINS_TOKEN`
-- `JENKINS_SERVER` (alias name)
-- `JENKINS_TIMEOUT` (ms)
-- `JENKINS_RETRIES`
+Precedence (highest → lowest): **CLI flags** > **Environment variables** > **Config file**.
 
-Config salvage features:
-- Truncates trailing garbage after final `}` if file partially corrupted
-- Normalises Markdown link style values: `[url](url)` → `url`
-
----
-## Core Commands
-
-```
-jenkins status <jobOrUrl> [build]
-jenkins list <jobOrUrl> [-l N]
-jenkins logs <jobOrUrl> [build] [-f]
-jenkins console <jobOrUrl> [build]   # alias of logs (no fancy formatting)
-jenkins trigger <jobOrUrl>
-jenkins build <job> --param KEY=VAL (repeatable)
-jenkins stop <job> <buildNumber>
-jenkins queue
-jenkins queue-cancel <id>
-jenkins test-report <job> <buildNumber>
-jenkins stages <job> <buildNumber>
-jenkins artifacts <jobOrUrl> [build] [-o dir] [-p pattern]
-jenkins open <jobOrUrl> [build]
-jenkins search <text> [-l N]
-jenkins ui <job> [-l N]              # Single-job TUI
-jenkins interactive                  # Multi-job TUI
-```
-
-Accepted `<jobOrUrl>` forms:
-- `my-job`
-- `folder/subfolder/job`
-- Full job URL: `https://ci.example.com/job/my-job/`
-- Full build URL: `https://ci.example.com/job/my-job/123/`
-
-When a build number is omitted the latest build of the job is used.
-
-Use `--json` for machine readable output where supported, `--pretty` for colourful inline summaries.
-
----
-## Interactive Explorer Highlights
-
-Launch: `jenkins interactive` (or `jenkins --interactive`).
-
-Panels: Jobs | Builds | Logs (+ Metadata bar + Status bar).
-
-Key features:
-- Incremental job traversal (handles thousands of jobs; cap 5000 safety)
-- Filters: live typing, result filter cycle (ALL/RUNNING/FAILED/SUCCESS), build fuzzy search
-- Log viewer: syntax highlighting, emojis (auto‑fallback), search (`/`, then `n` / `N`), line numbers toggle `l`, bookmarks (`m`, list via `M`), jump to levels (`e`, `W`, `i`), jump to top/bottom (`g`, `G`)
-- Follow mode for running builds (`f`)
-- Artifacts popup (`a`)
-- Sorting toggle (`S`), auto-refresh (`t`)
-- Open in browser (`w`) when not focused on logs
-
-Scrollbar automatically falls back to ASCII (`|`) if full Unicode is disabled or limited.
-
-### Single Job Mode
-```
-jenkins interactive --jobs my-job
-```
-This hides the Jobs panel and focuses Builds + Logs for faster navigation.
-
-### Basic Color / Compatibility Flags
-- `--basic-colors` forces 8‑color mode
-- `--no-terminfo` suppresses terminfo/tput usage (avoids Setulc warnings on minimal terms)
+Salvage logic automatically:
+- Truncates trailing garbage past final `}` if file partially corrupted.
+- Normalizes markdown links `[text](url)` → `url`.
 
 ---
 ## Log Formatting & Highlighting
+Pattern-based enrichment turns plain build text into readable diagnostics.
 
-Automatic enrichment detects and styles:
-- Build state lines (SUCCESS / FAILURE / UNSTABLE / ABORTED)
-- Maven / Gradle phases & summaries
-- Test result aggregates (tests run, failures, errors, skipped)
-- Docker (pull, build, tag) & Git (clone, checkout, merge) commands
-- File system operations (mkdir, rm, cp, mv, chmod, chown)
-- Common build tools (npm, yarn, pip, mvn, gradle, make, cargo, go build)
-- Diff hunks, additions / deletions
-- Timestamps (multiple formats) with clock icon
-- Log levels (ERROR, FATAL, WARN, INFO, DEBUG, TRACE) with icon + color
-- Exceptions / stack frames
-- JSON (full parse + pretty highlight when line is standalone JSON)
-- URLs, file paths, numbers with units, percentages, progress ratios
+| Category | Examples Detected | Styling |
+|----------|------------------|---------|
+| Build Result | `BUILD SUCCESS`, `BUILD FAILURE`, `UNSTABLE` | Colored + icon |
+| Test Summary | `Tests run: X Failures: Y Errors: Z` | Numeric color emphasis |
+| Tools | `docker pull`, `git clone`, `npm install` | Prefixed icons & color |
+| Diffs | `@@ ... @@`, `+added`, `-removed` | Magenta hunk / green / red |
+| Levels | `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, stack traces | Rich labels / dim frames |
+| JSON Lines | Single-line JSON objects / arrays | Pretty-highlighted or manual fallback |
+| Paths & URLs | `~/file.ts`, `C:\path\a.js`, `https://...` | Cyan / underlined URLs |
+| Progress | `31/120 (25%)` or just `31/120` | Recomputed percentage |
 
-Emoji / icon fallback (if terminal lacks support or in CI / VSCode): environment triggers replacement tokens (`[OK]`, `[X]`, etc.).
-
-You can force plain mode with: `JENKINS_CLI_NO_ICONS=1` or `JENKINS_CLI_PLAIN=1`.
+Disable icons entirely: `JENKINS_CLI_NO_ICONS=1` (or `JENKINS_CLI_PLAIN=1`).
 
 ---
 ## Artifacts
 
-List artifacts:
-```
-jenkins artifacts my-job 123
-```
-Filter & download all matching to a directory:
-```
-jenkins artifacts my-job 123 -p .jar -o dist-artifacts
-```
+```bash
+# List artifacts of latest build (auto-resolves if number omitted)
+jenkins artifacts my-job
 
----
-## Triggering Builds
+# List artifacts for specific build
+jenkins artifacts my-job 128
 
-Simple trigger:
-```
-jenkins trigger my-job
-```
-Parameterized:
-```
-jenkins build my-job --param BRANCH=feature-x --param CACHE=false
-```
+# Download all to directory (creates if missing)
+jenkins artifacts my-job 128 -o dist/artifacts
 
-Stop a running build:
-```
-jenkins stop my-job 456
+# Filter by substring (.jar) BEFORE downloading
+jenkins artifacts my-job 128 -p .jar -o jars/
 ```
 
 ---
 ## Queue & Pipeline Info
-```
-jenkins queue
-jenkins queue-cancel 1234
-jenkins stages my-job 789
-jenkins test-report my-job 789 --json
+```bash
+jenkins queue                 # List queued tasks
+jenkins queue-cancel 1234     # Cancel item
+jenkins stages my-job 456     # Pipeline stages (needs workflow-api plugin)
+jenkins test-report my-job 456 --json  # Full JUnit JSON structure
 ```
 
 ---
 ## Environment Variables Summary
-
-| Variable | Purpose |
-|----------|---------|
-| JENKINS_URL | Base URL override |
-| JENKINS_USER | Username override |
-| JENKINS_TOKEN | API token override |
-| JENKINS_SERVER | Server alias to select |
-| JENKINS_TIMEOUT | Request timeout (ms) |
-| JENKINS_RETRIES | Retry attempts (0-9) |
-| JENKINS_CLI_NO_ICONS | Force icon/emoji fallback |
-| JENKINS_CLI_PLAIN | Same as above (plain mode) |
-| JENKINS_CLI_ASCII_SCROLLBAR | Force ASCII scrollbar (fallback occurs automatically when needed) |
+| Variable | Purpose | Notes |
+|----------|---------|-------|
+| `JENKINS_URL` | Base URL override | Same as `--url` |
+| `JENKINS_USER` | Username override |  |
+| `JENKINS_TOKEN` | Token override |  |
+| `JENKINS_SERVER` | Server alias | Chosen from config file |
+| `JENKINS_TIMEOUT` | Request timeout (ms) | Default 15000 |
+| `JENKINS_RETRIES` | Retry attempts (0–9) | Default 0 |
+| `JENKINS_CLI_NO_ICONS` | Disable Unicode/emoji | Plain text tokens |
+| `JENKINS_CLI_PLAIN` | Same as above |  |
+| `JENKINS_CLI_ASCII_SCROLLBAR` | Force ASCII scrollbar | Usually auto-chosen |
 
 ---
 ## Programmatic Usage
+Import the client (ESM):
 
 ```ts
 import { JenkinsClient } from '@kud/jenkins-cli';
 
 const client = new JenkinsClient('https://ci.example.com', 'user', 'token');
 const build = await client.getBuild('my-job');
-console.log(build.result);
+console.log('Result:', build.result);
 ```
 
-Stream logs progressively:
+Progressive log stream:
 ```ts
-await client.streamConsole('my-job', 123, chunk => process.stdout.write(chunk));
+await client.streamConsole('my-job', 123, chunk => {
+  process.stdout.write(chunk); // apply your own formatting if desired
+});
 ```
 
-List builds:
+Search jobs incrementally:
 ```ts
-const builds = await client.listBuilds('my-job', 5);
+const jobs = await client.searchJobs('backend', 200); // cap results
+for (const j of jobs) console.log(j.fullName || j.name);
 ```
 
-Search jobs:
+Download artifact:
 ```ts
-const jobs = await client.searchJobs('backend');
+const { artifacts } = await client.getArtifacts('my-job', 123);
+for (const a of artifacts) {
+  const buf = await client.downloadArtifact('my-job', 123, a.relativePath);
+  // write buffer somewhere
+}
 ```
 
 ---
 ## Prepublish / Development
-
-Build TypeScript:
-```
+```bash
+# Build TS → dist/
 npm run build
-```
 
-During development (watch):
-```
+# Watch mode
 npm run dev
-```
 
-Tests (basic placeholders):
-```
+# Tests (placeholder for now)
 npm test
 ```
-
-A `prepublishOnly` script runs the build automatically before `npm publish` (added in package.json).
+Publishing runs the build automatically via `prepublishOnly`.
 
 ---
 ## Why Another Jenkins CLI?
-- Lean: no XML parsing madness; uses JSON endpoints
-- Fast incremental traversal for huge instances
-- Human-friendly log enrichment without requiring Jenkins plugins
-- Resilient config salvage + multi-server switching
-- Modern Node & ESM focus simplifies dependency stack
+- Existing CLIs are bulky or incomplete for log exploration.
+- Need fast traversal & multi-server context switching.
+- Rich real-time log augmentation without external plugins.
+- Modern Node (fetch, ESM) keeps surface minimal.
 
 ---
 ## Roadmap Ideas
-- Richer pipeline visualization (tree / timings)
-- Inline artifact preview (text/json)
-- Match navigation inside logs (scroll to match position)
-- Export logs as structured JSON (level, timestamp, message)
-- Optional metrics / caching layer
+- In-log match navigation (cursor → exact line for search hits)
+- Structured log export (JSON objects: timestamp, level, message)
+- Richer pipeline / stage timing visualization
+- Inline artifact preview (JSON / text, maybe diff)
+- Config encryption for tokens (optional)
 
-PRs & issues welcome.
+> Have a feature idea? Open an issue / PR.
 
 ---
 ## License
 MIT
+
+---
+### Badge Notes
+Replace the placeholder CI badge with a real GitHub Actions badge once the repository slug is public:
+```md
+![CI](https://img.shields.io/github/actions/workflow/status/ORG/REPO/ci.yml?branch=main)
+```
+
+---
+Happy building! 🛠️
