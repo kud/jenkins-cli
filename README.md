@@ -86,6 +86,37 @@ jenkins trigger my-job
 jenkins artifacts my-job 123 -p .jar -o jars/
 ```
 
+### Non-Interactive Quick Start
+If you see an error like `missing required argument 'jobOrUrl'`, it means the command expects a job name (or a full job/build URL) as the first positional argument.
+
+Common patterns:
+```bash
+# Latest build status (pretty colors)
+jenkins status my-service --pretty
+
+# Follow live logs of latest (or specific) build
+jenkins logs my-service -f
+jenkins logs my-service 128 -f
+
+# Plain console (same as logs without -f)
+jenkins console my-service
+jenkins console https://ci.example.com/job/my-service/128/
+
+# List recent builds (limit 20)
+jenkins list my-service -l 20
+```
+`<jobOrUrl>` accepts either:
+- A simple job name (folder paths use `/`, e.g. `team/backend-api`)
+- A full build URL (`.../job/<name>/<build>/`) or job URL (`.../job/<name>/`)
+
+If the build number is omitted, the CLI resolves the latest build where supported.
+
+Interactive exploration (jobs + builds + logs) still uses either:
+```bash
+jenkins --interactive            # root flag form
+jenkins interactive              # explicit subcommand form
+```
+
 ---
 ## 🧾 Usage Cheat Sheet
 

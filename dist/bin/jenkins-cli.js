@@ -23,6 +23,19 @@ program
     .option('--no-terminfo', 'Disable terminfo/tput features (avoids Setulc warnings)')
     .option('--project <job>', 'Preselect job in interactive explorer')
     .option('--jobs <jobs>', 'Filter/specify jobs (comma-separated). Single job hides Jobs panel.');
+// Enhanced guidance for missing required positional arguments (non-interactive usage)
+program.showHelpAfterError();
+program.configureOutput({
+    writeErr: (str) => {
+        if (str && str.toLowerCase().includes('missing required argument')) {
+            console.error(str.trim());
+            console.error('\nExamples:\n  jenkins status my-job\n  jenkins logs my-job -f\n  jenkins console my-job 123\n  jenkins list my-job\n\nTip: Provide the job name (or full build URL). See `jenkins --help` for more.');
+        }
+        else {
+            console.error(str);
+        }
+    }
+});
 const getClient = async () => {
     const globalOpts = program.opts();
     if (globalOpts.debugConfig)

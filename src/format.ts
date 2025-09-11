@@ -30,10 +30,30 @@ export function formatBuildList(builds, { pretty = false } = {}) {
 }
 
 export function formatError(err) {
-  if (err.status === 401 || err.status === 403) {
+  if (err && (err.status === 401 || err.status === 403)) {
     console.error('Auth error (check user/token permissions)');
   }
-  console.error(err.message || err);
+  // Friendly guidance for 404s (e.g. user passed only a build number without job)
+  if (err && err.status === 404) {
+    console.error('Not found (404).');
+    console.error('Likely causes:');
+    console.error('  - Wrong job name');
+    console.error('  - You supplied only a build number but omitted the job');
+    console.error('  - Build number does not exist for that job');
+    console.error('\nUsage examples:');
+    console.error('  jenkins console my-job 123');
+    console.error('  jenkins status my-job');
+    console.error('  jenkins logs my-job -f');
+    console.error('\nTip: format is <job> [buildNumber] or full job/build URL.');
+    return;
+  }
+  // Suppress noisy HTML bodies
+  const msg = (err && err.message) ? err.message : String(err);
+  if (/<!DOCTYPE html>/i.test(msg)) {
+    console.error(msg.split(/</)[0].trim() || 'Error (HTML body suppressed)');
+  } else {
+    console.error(msg);
+  }
 }
 
 // Convert highlight.js tokens to chalk formatting
