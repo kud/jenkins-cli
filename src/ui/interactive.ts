@@ -161,14 +161,18 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     top: 0,
     left: singleJobMode ? '30%' : '40%',
     width: singleJobMode ? '70%' : '60%',
-    height: 6,
+    height: 7,
     border: 'line',
     tags: true,
     wrap: true,
+    scrollable: true,
+    alwaysScroll: true,
+    keys: true,
+    mouse: true,
     style: { 
       fg: 'white', 
       border: { fg: 'cyan' },
-      label: { fg: 'cyan', bold: true }
+      label: { fg: 'lightblue', bold: true }
     },
     content: '{gray-fg}Select a build to view metadata{/}'
   });
@@ -178,10 +182,10 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   const logBox = blessed.box({
     parent: screen,
     label: ' Logs ',
-    top: 6,
+    top: 7,
     left: singleJobMode ? '30%' : '40%',
     width: singleJobMode ? '70%' : '60%',
-    height: '100%-9', // Adjusted for metadata box above
+    height: '100%-10', // Adjusted for larger metadata box above
     scrollable: true,
     alwaysScroll: true,
     mouse: true,
@@ -268,6 +272,14 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   let feedbackTimeout = null; // For visual feedback
   let logReversed = true; // Default: newest logs first
   let logFullscreen = false; // Track fullscreen state
+  // Removed aiMode; use presence of analysisBox to indicate active AI view
+  let analysisBox: any = null; // AI analysis modal box
+  let aiChildProcess: any = null; // streaming child process for AI
+  let analysisUpdateTimer: any = null; // throttle timer for streaming updates
+  let analysisRawMarkdown = ''; // accumulated raw markdown from model
+  let analysisLastRender = 0; // last render timestamp
+  let pipelineBox: Widgets.BoxElement | null = null; // pipeline diagram modal
+  let pipelineLoading = false;
   type InputMode = 'none' | 'classic' | 'job-search' | 'build-filter' | 'build-search' | 'log-search';
   let inputMode: InputMode = 'none';
   let classicTypingMode = false;
@@ -294,7 +306,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     if (inputMode === 'classic') inputMode = 'none';
   };
 
-  const isClassicTypingContext = () => (jobsBox.focused || buildsBox.focused) && !helpBox && !artifactBox && !artifactMode;
+  const isClassicTypingContext = () => (jobsBox.focused || buildsBox.focused) && !helpBox && !artifactBox && !pipelineBox && !artifactMode;
   const isClassicTypingActive = () => classicTypingMode && isClassicTypingContext();
 
   // Add visual feedback when switching panes
@@ -330,14 +342,38 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   // Helper function to strip HTML tags and decode entities
   const stripHtml = (html) => {
     if (!html) return '';
-    return html
-      .replace(/<[^>]*>/g, '') // Remove HTML tags
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .trim();
+    let text = html.replace(/<[^>]*>/g, ''); // Remove HTML tags
+
+    const namedEntities: Record<string, string> = {
+      amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+      hellip: '...', ndash: '-', mdash: '-', lsquo: "'", rsquo: "'",
+      ldquo: '"', rdquo: '"', bull: '•'
+    };
+    text = text.replace(/&([a-zA-Z]+);/g, (_, entity: string) => {
+      const lower = entity.toLowerCase();
+      return Object.prototype.hasOwnProperty.call(namedEntities, lower)
+        ? namedEntities[lower]
+        : `&${entity};`;
+    });
+
+    text = text.replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => {
+      const code = parseInt(hex, 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+    });
+
+    text = text.replace(/&#(\d+);/g, (_, dec: string) => {
+      const code = parseInt(dec, 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+    });
+
+    // Normalize common Unicode punctuation to ASCII-friendly equivalents
+    text = text
+      .replace(/[\u2013\u2014]/g, '-')
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2026]/g, '...');
+
+    return text.trim();
   };
 
   // Helper function to clean log content of problematic characters
@@ -372,7 +408,13 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     
     // Clean the content first to remove problematic characters
     const cleanedContent = cleanLogContent(content);
-    const lines = cleanedContent.split('\n');
+    let lines = cleanedContent.split('\n');
+    
+    // Remove trailing empty lines
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+      lines.pop();
+    }
+    
     const processedLines = lines.map((line, index) => {
       const lineNumber = index + 1;
       const timestamp = extractTimestamp(line);
@@ -706,22 +748,6 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
 
     segments.push(shortcuts.join(' '));
 
-    // Build stats at the end (if we have a build selected)
-    if (pane === 'LOGS' && logLines.length > 0) {
-      const stats = {
-        total: logLines.length,
-        errors: logLines.filter(l => l.level === 'ERROR' || l.level === 'FATAL').length,
-        warnings: logLines.filter(l => l.level === 'WARN' || l.level === 'WARNING').length
-      };
-      
-      const statParts = [];
-      statParts.push(`{gray-fg}${stats.total} lines{/}`);
-      if (stats.errors > 0) statParts.push(`{red-fg}${stats.errors} errors{/}`);
-      if (stats.warnings > 0) statParts.push(`{yellow-fg}${stats.warnings} warnings{/}`);
-      
-      segments.push(statParts.join(' '));
-    }
-
     return segments;
   };
   const updatePaneIndicators = () => {
@@ -751,6 +777,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   };
 
   const refreshJobs = async () => {
+    if (analysisBox) { setStatus('{cyan-fg}AI analysis open (jobs may refresh){/}'); }
     try {
       if (singleJobMode) {
         // Single job mode - just set up the job directly
@@ -969,6 +996,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   };
 
   const refreshBuilds = async () => {
+    if (analysisBox) { setStatus('{cyan-fg}AI analysis open{/}'); }
     if (!currentJob) return;
     try {
       setStatus(`{yellow-fg}Loading builds for ${currentJob}...{/}`, { suppressShortcuts: true });
@@ -992,67 +1020,89 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     screen.render();
   };
 
-  const loadLogs = async (num) => {
-    if (!currentJob || !num) return;
-    
-    logCurrentBuild = num;
-    
-    // Find the build object to get metadata
+  const updateMetadataBox = (num) => {
     const currentBuild = builds.find(b => b.number === num);
     
-    // Update metadata box with build information
-    if (currentBuild) {
-      const status = currentBuild.building ? 'RUNNING' : (currentBuild.result || 'UNKNOWN');
-      const fmtMetaDuration = (ms) => {
-        if (!ms || ms < 0) return '0s';
-        if (ms < 60000) return `${Math.round(ms / 1000)}s`;
-        const minutes = Math.floor(ms / 60000);
-        const seconds = Math.round((ms % 60000) / 1000);
-        if (minutes >= 60) {
-          const hours = Math.floor(minutes / 60);
-          const remMinutes = minutes % 60;
-          if (remMinutes === 0) return `${hours}h`;
-          return seconds > 0 ? `${hours}h ${remMinutes}m ${seconds}s` : `${hours}h ${remMinutes}m`;
-        }
-        return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-      };
+    if (!currentBuild) {
+      metadataBox.setContent(`{gray-fg}Build #${num} - No metadata available{/}`);
+      return;
+    }
+    
+    const status = currentBuild.building ? 'RUNNING' : (currentBuild.result || 'UNKNOWN');
+    const fmtMetaDuration = (ms) => {
+      if (!ms || ms < 0) return '0s';
+      if (ms < 60000) return `${Math.round(ms / 1000)}s`;
+      const minutes = Math.floor(ms / 60000);
+      const seconds = Math.round((ms % 60000) / 1000);
+      if (minutes >= 60) {
+        const hours = Math.floor(minutes / 60);
+        const remMinutes = minutes % 60;
+        if (remMinutes === 0) return `${hours}h`;
+        return seconds > 0 ? `${hours}h ${remMinutes}m ${seconds}s` : `${hours}h ${remMinutes}m`;
+      }
+      return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+    };
 
-      const duration = currentBuild.building ? 
-        `~${fmtMetaDuration(Date.now() - (currentBuild.timestamp || Date.now()))}` : 
-        fmtMetaDuration(currentBuild.duration || 0);
-      
-      const statusColor = currentBuild.building ? 'yellow' : 
-        (currentBuild.result === 'SUCCESS' ? 'green' : 
-         currentBuild.result === 'FAILURE' ? 'red' : 
-         currentBuild.result === 'UNSTABLE' ? 'yellow' : 'cyan');
-      
-      const startTime = currentBuild.timestamp ? new Date(currentBuild.timestamp).toLocaleString() : 'Unknown';
-      const description = stripHtml(currentBuild.description) || 'No description';
-      
-      // Try to extract user from build data or actions
-      let startedBy = 'Unknown';
-      if (currentBuild.actions) {
-        const causeAction = currentBuild.actions.find(a => a._class?.includes('CauseAction') || a.causes);
-        if (causeAction?.causes) {
-          const userCause = causeAction.causes.find(c => c.userId || c.userName);
-          if (userCause) {
-            startedBy = userCause.userName || userCause.userId || 'Unknown';
-          } else if (causeAction.causes[0]?.shortDescription) {
-            // Fallback to short description (e.g., "Started by user admin")
-            const match = causeAction.causes[0].shortDescription.match(/Started by (?:user )?(.+)/i);
-            if (match) startedBy = match[1];
-          }
+    const duration = currentBuild.building ? 
+      `~${fmtMetaDuration(Date.now() - (currentBuild.timestamp || Date.now()))}` : 
+      fmtMetaDuration(currentBuild.duration || 0);
+    
+    const statusColor = currentBuild.building ? 'yellow' : 
+      (currentBuild.result === 'SUCCESS' ? 'green' : 
+       currentBuild.result === 'FAILURE' ? 'red' : 
+       currentBuild.result === 'UNSTABLE' ? 'yellow' : 'cyan');
+    
+    const startTime = currentBuild.timestamp ? new Date(currentBuild.timestamp).toLocaleString() : 'Unknown';
+    const description = stripHtml(currentBuild.description) || 'No description';
+    
+    // Try to extract user from build data or actions
+    let startedBy = 'Unknown';
+    if (currentBuild.actions) {
+      const causeAction = currentBuild.actions.find(a => a._class?.includes('CauseAction') || a.causes);
+      if (causeAction?.causes) {
+        const userCause = causeAction.causes.find(c => c.userId || c.userName);
+        if (userCause) {
+          startedBy = userCause.userName || userCause.userId || 'Unknown';
+        } else if (causeAction.causes[0]?.shortDescription) {
+          // Fallback to short description (e.g., "Started by user admin")
+          const match = causeAction.causes[0].shortDescription.match(/Started by (?:user )?(.+)/i);
+          if (match) startedBy = match[1];
         }
       }
-      
-      metadataBox.setContent(
-        `{bold}{white-fg}Build:{/} {bold}#${num}{/}  {bold}{white-fg}Status:{/} {${statusColor}-fg}${status}{/}  {bold}{white-fg}Duration:{/} {cyan-fg}${duration}{/}\n` +
-        `{bold}{white-fg}Started:{/} {gray-fg}${startTime}{/}  {bold}{white-fg}By:{/} {cyan-fg}${startedBy}{/}\n` +
-        `{bold}{white-fg}Description:{/} ${description}`
-      );
-    } else {
-      metadataBox.setContent(`{gray-fg}Build #${num} - No metadata available{/}`);
     }
+    
+    // Calculate log stats
+    const logStats = logLines.length > 0 ? {
+      total: logLines.length,
+      errors: logLines.filter(l => l.level === 'ERROR' || l.level === 'FATAL').length,
+      warnings: logLines.filter(l => l.level === 'WARN' || l.level === 'WARNING').length
+    } : null;
+    
+    let statsLine = '';
+    if (logStats) {
+      const statParts = [];
+      statParts.push(`{bold}{yellow-fg}Lines:{/} {white-fg}${logStats.total}{/}`);
+      if (logStats.errors > 0) statParts.push(`{bold}{yellow-fg}Errors:{/} {red-fg}${logStats.errors}{/}`);
+      if (logStats.warnings > 0) statParts.push(`{bold}{yellow-fg}Warnings:{/} {yellow-fg}${logStats.warnings}{/}`);
+      statsLine = `\n${statParts.join('  ')}`;
+    }
+    
+    metadataBox.setContent(
+      `{bold}{yellow-fg}Build:{/} {white-fg}#${num}{/}  {bold}{yellow-fg}Status:{/} {${statusColor}-fg}${status}{/}  {bold}{yellow-fg}Duration:{/} {white-fg}${duration}{/}\n` +
+      `{bold}{yellow-fg}Started:{/} {white-fg}${startTime}{/}  {bold}{yellow-fg}By:{/} {white-fg}${startedBy}{/}\n` +
+      `{bold}{yellow-fg}Description:{/} {white-fg}${description}{/}${statsLine}`
+    );
+  };
+
+  const loadLogs = async (num) => {
+    if (analysisBox) { setStatus('{cyan-fg}AI analysis open (logs still load){/}'); }
+    if (!currentJob || !num) return;
+
+    if (pipelineBox) { closePipelineModal({ silent: true }); }
+    logCurrentBuild = num;
+    
+    // Update metadata box (will be called again after logs load to include stats)
+    updateMetadataBox(num);
     
     // Reset log label to simple title
     logBox.setLabel(' Logs ');
@@ -1098,7 +1148,8 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
         logBox.setScrollPerc(0);
         screen.render();
         
-        // Stats are now shown in footer automatically, just update status
+        // Update metadata box again with log stats
+        updateMetadataBox(num);
         setStatus();
       }
     } catch (e) {
@@ -1222,9 +1273,15 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     // Note: logLines are already in display order (reversed or not), so use them directly
     const rawText = logLines.map(l => l.raw).join('\n');
     
-    // If no query, don't change display
+    // If no query, restore original logs
     if (!logSearchQuery || logSearchQuery.trim() === '') {
       logSearchMatches = [];
+      if (logRawText && logCurrentBuild) {
+        const processed = processLogContent(logRawText, logCurrentBuild);
+        logLines = processed.lines;
+        logBox.setContent(processed.formattedContent);
+        logBox.setScrollPerc(0);
+      }
       setStatus();
       screen.render();
       return;
@@ -1256,6 +1313,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   };
 
   const startFollow = async (num) => {
+    if (analysisBox) { setStatus('{cyan-fg}AI analysis open (following logs){/}'); }
     if (!currentJob || !num) return;
     if (abortController) abortController.abort();
     abortController = new AbortController();
@@ -1327,6 +1385,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     if (!selectedJob) return;
     
     currentJob = selectedJob.name;
+    if (pipelineBox) { closePipelineModal({ silent: true }); }
     
     // Check if this job has an error
     if (selectedJob.error) {
@@ -1407,11 +1466,12 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
       jobsBox.select(0);
     }
     currentJob = filteredJobs[0]?.name || null;
+    if (pipelineBox) { closePipelineModal({ silent: true }); }
     screen.render();
   };
 
   const startJobSearch = () => {
-    if (singleJobMode || (helpBox || artifactBox)) return;
+    if (singleJobMode || (helpBox || artifactBox || pipelineBox)) return;
     searchMode = true;
     buildFilterMode = false;
     buildSearchMode = false;
@@ -1578,31 +1638,31 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   screen.key('r', async () => { if (isTyping()) return; await refreshJobs(); await refreshBuilds(); });
   screen.key('f', () => { if (isTyping()) return; follow = !follow; setStatus((follow? 'Follow ON' : 'Follow OFF')); });
   
-  // Open current job or build in web browser
+  // Open job/build in browser or toggle wrap (logs focused)
   screen.key('w', async () => {
-    if (isTyping() || helpBox || artifactBox) return;
+    if (isTyping() || helpBox || artifactBox || pipelineBox) return;
+    if (logBox.focused) {
+      logWrapMode = !logWrapMode;
+      setStatus(`{yellow-fg}Word wrap toggle noted (${logWrapMode ? 'ON' : 'OFF'}) - refresh logs to apply{/}`);
+      screen.render();
+      return;
+    }
     try {
       const base = client.baseUrl.replace(/\/$/, '');
       let url;
-      
       if (currentJob) {
         const selIdx = buildsBox.selected;
         const selectedBuild = filteredBuilds[selIdx];
-        
         if (selectedBuild && buildsBox.focused) {
-          // Open specific build if builds panel is focused and a build is selected
           url = `${base}/job/${encodeURIComponent(currentJob)}/${selectedBuild.number}/`;
           setStatus(`Opening build #${selectedBuild.number} in browser...`);
         } else {
-          // Open job page
           url = `${base}/job/${encodeURIComponent(currentJob)}/`;
           setStatus(`Opening job ${currentJob} in browser...`);
         }
-        
         const { exec } = await import('child_process');
         const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
         exec(`${opener} "${url}"`);
-        
         setTimeout(() => setStatus('Ready'), 2000);
       } else {
         setStatus('No job selected');
@@ -1611,12 +1671,12 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
       setStatus('Error opening browser: ' + e.message);
     }
   });
-  screen.key('S', () => { if (isTyping()) return; sortAsc = !sortAsc; applyBuildFilters(); setStatus(`Sort: ${sortAsc?'ASC':'DESC'}`); });
+  screen.key(['S', 'S-s'], () => { if (isTyping()) return; sortAsc = !sortAsc; applyBuildFilters(); setStatus(`Sort: ${sortAsc?'ASC':'DESC'}`); });
   screen.key('t', () => { if (isTyping()) return; autoRefresh = !autoRefresh; if (autoRefresh) startAutoRefresh(); else if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer=null; } setStatus(`AutoRefresh: ${autoRefresh ? (autoRefreshInterval/1000)+'s' : 'OFF'}`); });
   screen.key('a', async () => { if (isTyping()) return; await showArtifacts(); });
   // Change job limit
-  screen.key('L', () => {
-    if (isTyping() || helpBox || artifactBox) return;
+  screen.key(['L', 'S-l'], () => {
+    if (isTyping() || helpBox || artifactBox || pipelineBox) return;
     let promptBox = blessed.box({ parent: screen, top: 'center', left: 'center', width: '40%', height: 5, border: 'line', label: ' Job Limit ', tags: true, content: 'Enter job limit (0 = unlimited):' });
     const input = blessed.textbox({ parent: promptBox, top: 2, left: 1, width: '90%', height: 1, inputOnFocus: true, keys: true, mouse: true, border: 'line' });
     input.on('submit', async (val) => {
@@ -1632,7 +1692,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   // Removed legacy duplicate '/' binding; unified later context-aware binding
 
   // Result filter cycle
-  screen.key('F', () => {
+  screen.key(['F', 'S-f'], () => {
     if (isTyping()) return;
     resultFilterIdx = (resultFilterIdx + 1) % resultFilterStates.length;
     applyBuildFilters();
@@ -1649,7 +1709,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
 
   // Build search modes
   screen.key('b', () => {
-    if (helpBox || artifactBox) return;
+    if (helpBox || artifactBox || pipelineBox) return;
     if (inputMode === 'classic') deactivateClassicTyping();
     if (isTyping()) return;
     if (!buildsBox.focused) { setStatus('{gray-fg}Focus the Builds panel to search builds{/}', { suppressShortcuts: true }); return; }
@@ -1657,8 +1717,8 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   });
 
   // Enhanced build search (uppercase B for fuzzy search)
-  screen.key('B', () => {
-    if (helpBox || artifactBox) return;
+  screen.key(['B', 'S-b'], () => {
+    if (helpBox || artifactBox || pipelineBox) return;
     if (inputMode === 'classic') deactivateClassicTyping();
     if (isTyping()) return;
     if (!buildsBox.focused) { setStatus('{gray-fg}Focus the Builds panel to search builds{/}', { suppressShortcuts: true }); return; }
@@ -1678,7 +1738,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
 
   // Contextual search (explicit via 's')
   screen.key('s', () => {
-    if (helpBox || artifactBox) return;
+    if (helpBox || artifactBox || pipelineBox) return;
     if (inputMode === 'classic') deactivateClassicTyping();
     if (isTyping()) return;
     if (!singleJobMode && jobsBox.focused) {
@@ -1701,7 +1761,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     }
   });
 
-  screen.key('N', () => {
+  screen.key(['N', 'S-n'], () => {
     if (logSearchMatches.length > 0 && logSearchQuery) {
       logSearchIndex = logSearchIndex <= 0 ? logSearchMatches.length - 1 : logSearchIndex - 1;
       setStatus(`{green-fg}Match ${logSearchIndex + 1}/${logSearchMatches.length}{/}`);
@@ -1725,7 +1785,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     }
   });
 
-  screen.key('W', () => {
+  screen.key(['W', 'S-w'], () => {
     if (isTyping()) return;
     if (logBox.focused) {
       jumpToLogLevel('WARN');
@@ -1752,7 +1812,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   });
 
   // Toggle log sort order
-  screen.key('R', () => {
+  screen.key(['R', 'S-r'], () => {
     if (isTyping()) return;
     if (logBox.focused && logCurrentBuild && logLines.length > 0) {
       logReversed = !logReversed;
@@ -1767,51 +1827,39 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     }
   });
 
-  // Toggle fullscreen logs
+  // Toggle fullscreen logs (works from any column)
   screen.key('z', () => {
-    if (isTyping()) return;
-    if (logBox.focused || logFullscreen) {
-      logFullscreen = !logFullscreen;
-      
-      if (logFullscreen) {
-        // Hide other panels and expand log box to fullscreen
-        if (!singleJobMode) (jobsBox as any).hide();
-        (buildsBox as any).hide();
-        (metadataBox as any).hide();
-        (logBox as any).top = 0;
-        (logBox as any).left = 0;
-        (logBox as any).width = '100%';
-        (logBox as any).height = '100%-3';
-        logBox.setLabel('{bold}{magenta-bg}{white-fg} Logs (Fullscreen - press z to exit) {/}');
-      } else {
-        // Restore normal layout
-        if (!singleJobMode) (jobsBox as any).show();
-        (buildsBox as any).show();
-        (metadataBox as any).show();
-        (logBox as any).top = 6;
-        (logBox as any).left = singleJobMode ? '30%' : '40%';
-        (logBox as any).width = singleJobMode ? '70%' : '60%';
-        (logBox as any).height = '100%-9';
-        logBox.setLabel(logBox.focused ? '{bold}{magenta-bg}{white-fg} Logs * {/}' : '{bold}{magenta-fg} Logs {/}');
-      }
-      
-      screen.render();
-      setStatus(`{green-fg}Fullscreen: ${logFullscreen ? 'ON' : 'OFF'}{/}`);
+    if (isTyping() || helpBox || artifactBox || pipelineBox) return;
+    
+    logFullscreen = !logFullscreen;
+    
+    if (logFullscreen) {
+      // Hide other panels and expand log box to fullscreen
+      if (!singleJobMode) (jobsBox as any).hide();
+      (buildsBox as any).hide();
+      (metadataBox as any).hide();
+      (logBox as any).top = 0;
+      (logBox as any).left = 0;
+      (logBox as any).width = '100%';
+      (logBox as any).height = '100%-3';
+      logBox.setLabel('{bold}{magenta-bg}{white-fg} Logs (Fullscreen - press z to exit) {/}');
+      logBox.focus();
+    } else {
+      // Restore normal layout
+      if (!singleJobMode) (jobsBox as any).show();
+      (buildsBox as any).show();
+      (metadataBox as any).show();
+      (logBox as any).top = 7;
+      (logBox as any).left = singleJobMode ? '30%' : '40%';
+      (logBox as any).width = singleJobMode ? '70%' : '60%';
+      (logBox as any).height = '100%-10';
+      logBox.setLabel(logBox.focused ? '{bold}{magenta-bg}{white-fg} Logs * {/}' : '{bold}{magenta-fg} Logs {/}');
     }
+    
+    screen.render();
+    setStatus(`{green-fg}Fullscreen: ${logFullscreen ? 'ON' : 'OFF'}{/}`);
   });
 
-  // Toggle wrap mode (note: blessed doesn't support dynamic wrap changes, so we show info instead)
-  screen.key('w', () => {
-    if (isTyping()) return;
-    if (logBox.focused) {
-      logWrapMode = !logWrapMode;
-      setStatus(`{yellow-fg}Word wrap toggle noted (${logWrapMode ? 'ON' : 'OFF'}) - refresh logs to apply{/}`);
-      screen.render();
-    } else {
-      // Original web behavior when not in logs
-      screen.emit('keypress', 'w', { name: 'w' });
-    }
-  });
 
   // Jump to top/bottom
   screen.key('g', () => {
@@ -1823,7 +1871,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     }
   });
 
-  screen.key('G', () => {
+  screen.key(['G', 'S-g'], () => {
     if (isTyping()) return;
     if (logBox.focused) {
       logBox.setScrollPerc(100);
@@ -1833,7 +1881,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   });
 
   // Navigate bookmarks
-  screen.key('M', () => {
+  screen.key(['M', 'S-m'], () => {
     if (isTyping()) return;
     if (logBox.focused && logBookmarks.length > 0) {
       // Just jump to the first bookmark for now
@@ -1845,10 +1893,672 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     }
   });
 
+  const closeAnalysisModal = () => {
+    // Cancel streaming process and timers
+    if (aiChildProcess) {
+      try { aiChildProcess.kill('SIGINT'); } catch {}
+      aiChildProcess = null;
+    }
+    if (analysisUpdateTimer) { clearTimeout(analysisUpdateTimer); analysisUpdateTimer = null; }
+    analysisRawMarkdown = '';
+    analysisLastRender = 0;
+    if (analysisBox) {
+      analysisBox.destroy();
+      analysisBox = null;
+    }
+    setStatus('{gray-fg}AI analysis closed{/}');
+    screen.render();
+  };
+
+  const closePipelineModal = (options: { silent?: boolean } = {}) => {
+    if (pipelineBox) {
+      pipelineBox.destroy();
+      pipelineBox = null;
+    }
+    pipelineLoading = false;
+    if (!options.silent) {
+      setStatus('{gray-fg}Pipeline view closed{/}');
+    }
+    screen.render();
+  };
+
+  const safeText = (value: unknown): string => {
+    const text = value == null ? '' : String(value);
+    const helpers = (blessed as any)?.helpers;
+    if (helpers && typeof helpers.escape === 'function') {
+      return helpers.escape(text);
+    }
+    return text.replace(/[{}]/g, (ch) => (ch === '{' ? '{open}' : '{close}'));
+  };
+
+  const formatDurationShort = (ms?: number | null): string => {
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '0s';
+    if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))}s`;
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.round((ms % 60000) / 1000);
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      const remMinutes = minutes % 60;
+      if (hours >= 24) {
+        const days = Math.floor(hours / 24);
+        const remHours = hours % 24;
+        if (remHours === 0 && remMinutes === 0) return `${days}d`;
+        if (remMinutes === 0) return `${days}d ${remHours}h`;
+        return `${days}d ${remHours}h ${remMinutes}m`;
+      }
+      if (remMinutes === 0) return `${hours}h`;
+      return seconds > 0 ? `${hours}h ${remMinutes}m ${seconds}s` : `${hours}h ${remMinutes}m`;
+    }
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  };
+
+  const stageStatusBadge = (rawStatus: unknown): string => {
+    const normalized = (rawStatus || 'UNKNOWN').toString().toUpperCase();
+    const status = normalized === 'FAILED' ? 'FAILURE' : normalized;
+    const palette: Record<string, { icon: string; color: string }> = {
+      SUCCESS: { icon: '✔', color: 'green-fg' },
+      FAILURE: { icon: '✖', color: 'red-fg' },
+      ABORTED: { icon: '■', color: 'magenta-fg' },
+      SKIPPED: { icon: '⏭', color: 'yellow-fg' },
+      PAUSED: { icon: '⏸', color: 'yellow-fg' },
+      RUNNING: { icon: '⟳', color: 'cyan-fg' },
+      IN_PROGRESS: { icon: '⟳', color: 'cyan-fg' },
+      QUEUED: { icon: '…', color: 'gray-fg' },
+      UNSTABLE: { icon: '▲', color: 'yellow-fg' },
+      NOT_EXECUTED: { icon: '…', color: 'gray-fg' },
+      UNKNOWN: { icon: '?', color: 'gray-fg' }
+    };
+    const scheme = palette[status] || { icon: '∙', color: 'gray-fg' };
+    return `{${scheme.color}}${scheme.icon} ${status}{/}`;
+  };
+
+  const collectStageChildren = (stage: any): any[] => {
+    const children: any[] = [];
+    if (Array.isArray(stage?.branches)) {
+      for (const branch of stage.branches) {
+        const branchStages = Array.isArray(branch?.stageFlowNodes) && branch.stageFlowNodes.length > 0
+          ? branch.stageFlowNodes
+          : branch?.stages;
+        children.push({
+          ...branch,
+          name: branch?.name || branch?.displayName || branch?.title || 'Branch',
+          status: branch?.status || branch?.result || branch?.state || stage.status,
+          __type: 'branch',
+          __detail: branchStages && branchStages.length ? `${branchStages.length} step${branchStages.length > 1 ? 's' : ''}` : '',
+          stages: branch?.stages,
+          stageFlowNodes: branch?.stageFlowNodes
+        });
+      }
+    }
+    if (Array.isArray(stage?.stages) && stage.stages.length) {
+      children.push(...stage.stages);
+    }
+    if (Array.isArray(stage?.stageFlowNodes) && stage.stageFlowNodes.length) {
+      const noteworthyNodes = stage.stageFlowNodes.filter((node: any) => {
+        const nodeStatus = (node?.status || node?.state || '').toString().toUpperCase();
+        if (!nodeStatus) return false;
+        return !['SUCCESS', 'FINISHED', 'NOT_BUILT', 'SKIPPED'].includes(nodeStatus);
+      });
+      for (const node of noteworthyNodes) {
+        children.push({
+          ...node,
+          name: node?.displayName || node?.name || `Step ${node?.id || ''}`,
+          status: node?.status || node?.state || 'UNKNOWN',
+          __type: 'step',
+          __detail: node?.error?.message || node?.displayDescription || node?.stageState || ''
+        });
+      }
+    }
+    return children;
+  };
+
+  const renderStageLines = (stage: any, prefix: string, isLast: boolean): string[] => {
+    const lines: string[] = [];
+    const connector = `${prefix}${isLast ? '└─' : '├─'}`;
+    const statusBadge = stageStatusBadge(stage?.status || stage?.state || stage?.result);
+    const name = safeText(stage?.name || stage?.displayName || stage?.title || stage?.id || 'Stage');
+    const typeSuffix = stage?.__type === 'branch'
+      ? ' {gray-fg}[branch]{/}'
+      : stage?.__type === 'step'
+        ? ' {gray-fg}[step]{/}'
+        : '';
+    let line = `${connector} ${statusBadge} {bold}${name}{/}${typeSuffix}`;
+    const durationMs = stage?.totalDurationMillis ?? stage?.durationMillis ?? stage?.duration;
+    if (typeof durationMs === 'number' && durationMs > 0) {
+      line += ` {gray-fg}(${formatDurationShort(durationMs)}){/}`;
+    }
+    if (stage?.pauseDurationMillis && stage.pauseDurationMillis > 0) {
+      line += ` {yellow-fg}[paused ${formatDurationShort(stage.pauseDurationMillis)}]{/}`;
+    }
+    const detail = stage?.__detail || stage?.error?.message || stage?.displayDescription || stage?.parameterDescription;
+    if (detail) {
+      line += ` {white-fg}— ${safeText(detail)}{/}`;
+    }
+    lines.push(line);
+
+    const children = collectStageChildren(stage);
+    if (children.length > 0) {
+      const childPrefix = `${prefix}${isLast ? '   ' : '│  '}`;
+      children.forEach((child, idx) => {
+        lines.push(...renderStageLines(child, childPrefix, idx === children.length - 1));
+      });
+    }
+    return lines;
+  };
+
+  const buildPipelineDiagram = (pipeline: any, jobName: string, buildNumber: number): string => {
+    if (!pipeline) return '{gray-fg}No pipeline data available{/}';
+    const lines: string[] = [];
+    const topStatus = stageStatusBadge(pipeline?.status || pipeline?.state || pipeline?.result);
+    const title = pipeline?.name ? safeText(pipeline.name) : `Job ${safeText(jobName)}`;
+    const duration = typeof pipeline?.durationMillis === 'number' ? ` {gray-fg}(${formatDurationShort(pipeline.durationMillis)}){/}` : '';
+    lines.push(`{bold}${topStatus} {white-fg}${title} #${buildNumber}{/}${duration}`);
+    if (pipeline?.startTimeMillis) {
+      lines.push(`{gray-fg}Started: ${safeText(new Date(pipeline.startTimeMillis).toLocaleString())}{/}`);
+    }
+    if (pipeline?.endTimeMillis) {
+      lines.push(`{gray-fg}Ended: ${safeText(new Date(pipeline.endTimeMillis).toLocaleString())}{/}`);
+    }
+    lines.push('');
+    if (Array.isArray(pipeline?.stages) && pipeline.stages.length > 0) {
+      pipeline.stages.forEach((stage: any, idx: number) => {
+        lines.push(...renderStageLines(stage, '', idx === pipeline.stages.length - 1));
+      });
+    } else {
+      lines.push('{gray-fg}No stage data available{/}');
+    }
+    return lines.join('\n');
+  };
+
+  const togglePipelineView = async () => {
+    if (pipelineLoading) return;
+    if (pipelineBox) {
+      closePipelineModal();
+      return;
+    }
+    if (!currentJob) {
+      setStatus('{yellow-fg}Select a job to view its pipeline{/}');
+      return;
+    }
+    if (!logCurrentBuild) {
+      setStatus('{yellow-fg}Select a build to visualize its pipeline{/}');
+      return;
+    }
+
+    pipelineLoading = true;
+    pipelineBox = blessed.box({
+      parent: screen,
+      top: 'center',
+      left: 'center',
+      width: '80%',
+      height: '80%',
+      border: 'line',
+      label: ` Pipeline ${currentJob} #${logCurrentBuild} `,
+      scrollable: true,
+      alwaysScroll: true,
+      keys: true,
+      mouse: true,
+      tags: true,
+      vi: true,
+      scrollbar: {
+        ch: asciiScrollbar ? '|' : '█',
+        style: { bg: 'gray', fg: 'cyan' },
+        track: {
+          ch: asciiScrollbar ? ' ' : '░',
+          style: { bg: 'black', fg: 'gray' }
+        }
+      },
+      content: '{cyan-fg}Loading pipeline stages...{/}'
+    });
+    (pipelineBox as any).key(['escape', 'p', 'x'], () => closePipelineModal());
+    pipelineBox.focus();
+    screen.render();
+    setStatus('{cyan-fg}Fetching pipeline stages...{/}', { suppressShortcuts: true });
+
+    try {
+      const pipeline = await client.getPipelineStages(currentJob, logCurrentBuild);
+      const diagram = buildPipelineDiagram(pipeline, currentJob, logCurrentBuild);
+      pipelineBox.setContent(diagram);
+      pipelineBox.setLabel(` Pipeline ${currentJob} #${logCurrentBuild} `);
+      setStatus('{green-fg}Pipeline view ready{/}');
+    } catch (error: any) {
+      const message = safeText(error?.message || String(error));
+      pipelineBox?.setContent(`{red-fg}Failed to load pipeline{/}\n\n${message}`);
+      setStatus(`{red-fg}Pipeline error: ${message}{/}`);
+    } finally {
+      pipelineLoading = false;
+      screen.render();
+    }
+  };
+
+  const performAIAnalysis = async (model?: string) => {
+    // Prevent multiple modals
+    if (analysisBox) { setStatus('{yellow-fg}AI analysis already running{/}'); return; }
+
+    try {
+      const { spawn } = await import('child_process');
+      const fs = await import('fs');
+      const os = await import('os');
+      const path = await import('path');
+
+      // Verify opencode exists (non-blocking attempt using spawn)
+      const whichProc = spawn('which', ['opencode']);
+      let whichOutput = '';
+      let whichError = '';
+      whichProc.stdout.on('data', d => whichOutput += d.toString());
+      whichProc.stderr.on('data', d => whichError += d.toString());
+      const whichResult: Promise<boolean> = new Promise(res => {
+        whichProc.on('close', code => res(code === 0 && whichOutput.trim().length > 0));
+      });
+      const hasOpencode = await whichResult;
+      if (!hasOpencode) {
+        setStatus('{red-fg}opencode not found. Install: npm install -g opencode{/}');
+        return;
+      }
+
+      // STEP 1: Model selection if none provided
+      if (!model) {
+        setStatus('{cyan-fg}Loading models (stream)...{/}', { suppressShortcuts: true });
+        screen.render();
+        const modelsProc = spawn('opencode', ['models']);
+        let modelsBuf = '';
+        modelsProc.stdout.on('data', d => { modelsBuf += d.toString(); });
+        modelsProc.stderr.on('data', d => { /* ignore noisy warnings */ });
+        modelsProc.on('close', () => {
+          const lines = modelsBuf.split('\n').map(l => l.trim()).filter(l => l && !/^Available/i.test(l));
+          if (lines.length === 0) {
+            setStatus('{red-fg}No AI models found (opencode models){/}');
+            return;
+          }
+          const modelSelectBox = blessed.list({
+            parent: screen,
+            width: '80%', height: '60%', top: 'center', left: 'center', border: 'line',
+            label: ' Select AI Model (Enter to confirm, ESC to cancel) ',
+            keys: true, vi: true, mouse: true, scrollable: true,
+            items: lines,
+            style: { border: { fg: 'cyan' }, label: { fg: 'cyan', bold: true }, selected: { bg: 'blue', fg: 'white' } }
+          });
+          (modelSelectBox as any).key(['enter'], () => {
+            const idx = (modelSelectBox as any).selected;
+            const chosen = lines[idx];
+            (modelSelectBox as any).destroy();
+            screen.render();
+            performAIAnalysis(chosen);
+          });
+          (modelSelectBox as any).key(['escape','q'], () => {
+            (modelSelectBox as any).destroy();
+            screen.render();
+            setStatus('{gray-fg}AI analysis cancelled{/}');
+          });
+          modelSelectBox.focus();
+          screen.render();
+        });
+        return;
+      }
+
+      // STEP 2: Prepare context (logs + metadata)
+      const buildNumber = logCurrentBuild;
+      const buildObj = buildNumber ? builds.find(b => b.number === buildNumber) : null;
+      const contextLines: string[] = [];
+      contextLines.push(`# Build Summary Prompt`);
+      contextLines.push(`Write a concise incident briefing for engineers using only plain sentences.`);
+      contextLines.push(`Rules:`);
+      contextLines.push(`- Output three or four sentences separated by periods. No headings, lists, markdown, emojis, or numbering.`);
+      contextLines.push(`- First sentence must name the failing job or stage and the immediate cause in fewer than 18 words.`);
+      contextLines.push(`- Later sentences must cover decisive evidence (include build number or timestamp), current impact, and the most direct fix.`);
+      contextLines.push(`- Use crisp technical language, uppercase severity words when needed (e.g. FAILURE, BLOCKED), and avoid filler or questions.`);
+      contextLines.push(`- Do not restate these instructions or comment on formatting—return only the sentences.`);
+      if (currentJob) contextLines.push(`Job: ${currentJob}`);
+      if (buildObj) contextLines.push(`Build: #${buildObj.number} Result: ${buildObj.building ? 'RUNNING' : (buildObj.result || 'UNKNOWN')}`);
+      if (buildObj && buildObj.timestamp) contextLines.push(`Started: ${new Date(buildObj.timestamp).toISOString()}`);
+      if (buildObj && buildObj.duration) contextLines.push(`Duration(ms): ${buildObj.duration}`);
+      contextLines.push('---');
+      const rawLogs = logRawText || logLines.map(l => l.raw).join('\n');
+      const trimmedLogs = rawLogs.split('\n').slice(0, 8000).join('\n'); // cap size
+      contextLines.push(trimmedLogs);
+      const promptFile = path.join(os.tmpdir(), `jenkins-ai-${Date.now()}.log`);
+      fs.writeFileSync(promptFile, contextLines.join('\n'));
+
+      // Build analysis modal
+      analysisBox = blessed.box({
+        parent: screen,
+        top: 'center', left: 'center', width: '90%', height: '80%',
+        border: 'line',
+        scrollable: true,
+        alwaysScroll: true,
+        keys: true,
+        vi: true,
+        mouse: true,
+        tags: true,
+        label: ` AI Analysis (${model}) - Streaming... (ESC to close) `,
+        scrollbar: {
+          ch: asciiScrollbar ? '|' : '█',
+          style: { bg: 'gray', fg: 'cyan' },
+          track: {
+            ch: asciiScrollbar ? ' ' : '░',
+            style: { bg: 'black', fg: 'gray' }
+          }
+        },
+        content: '{cyan-fg}Starting AI analysis...{/}\n\n{gray-fg}Streaming response will appear here. Please wait...{/}'
+      });
+      analysisBox.focus();
+      screen.render();
+      setStatus('{cyan-fg}AI analysis started (streaming){/}', { suppressShortcuts: true });
+
+      const scrollModal = (delta: number) => {
+        if (!analysisBox) return;
+        analysisBox.scroll(delta);
+        screen.render();
+      };
+      const modalPageSize = () => {
+        const h = analysisBox?.height;
+        if (typeof h === 'number' && Number.isFinite(h)) {
+          return Math.max(1, h - 2);
+        }
+        return Math.max(1, Math.floor(screen.height * 0.7));
+      };
+      (analysisBox as any).key(['up', 'k'], () => scrollModal(-1));
+      (analysisBox as any).key(['down', 'j'], () => scrollModal(1));
+      (analysisBox as any).key(['pageup'], () => scrollModal(-modalPageSize()));
+      (analysisBox as any).key(['pagedown'], () => scrollModal(modalPageSize()));
+
+       // Spawn opencode analysis using positional prompt file
+       const args = ['run', '--model', model, '--format', 'json'];
+       aiChildProcess = spawn('opencode', args, { env: { ...process.env } });
+       analysisRawMarkdown = '';
+       analysisLastRender = 0;
+
+       const sanitizeChunk = (raw: string) => {
+         let s = raw.replace(/\r+/g, '\n'); // convert carriage returns to newlines
+         s = s.replace(/\x1B\[[0-9;]*[A-Za-z]/g, ''); // strip ANSI escape codes
+         return s;
+       };
+
+       const escapeForBlessed = (value: string) => {
+         const helpers = (blessed as any)?.helpers;
+         if (helpers && typeof helpers.escape === 'function') {
+           return helpers.escape(value);
+         }
+         return value.replace(/[{}]/g, ch => (ch === '{' ? '{open}' : '{close}'));
+       };
+
+       const renderNow = () => {
+         if (!analysisBox) return;
+         let display = analysisRawMarkdown.replace(/```+/g, ''); // strip fenced markers but keep content
+         display = escapeForBlessed(display); // protect against blessed tag injection
+
+        // Apply simple color formatting for readability
+        display = display.replace(/^(\|\s*Stage\s*\|\s*State\s*\|\s*Detail\s*\|)$/gm, (line) => `{cyan-fg}{bold}${line}{/bold}{/}`);
+        display = display.replace(/^(\|[-\s|]+\|)$/gm, (line) => `{cyan-fg}${line}{/}`);
+        display = display.replace(
+          /^\|\s*([^|\n]+)\|\s*([^|\n]+)\|\s*([^|\n]+?)\s*\|$/gm,
+          (_line, stage: string, state: string, detail: string) => {
+            const stageLabel = stage.trim();
+            const stateLabel = state.trim();
+            const detailLabel = detail.trim();
+            let stateColor = 'white-fg';
+            if (/fail|error|abort|mismatch|blocked/i.test(stateLabel)) stateColor = 'red-fg';
+            else if (/skip|defer|pending/i.test(stateLabel)) stateColor = 'yellow-fg';
+            else if (/pass|success|healthy|recovered|ok/i.test(stateLabel)) stateColor = 'green-fg';
+            const detailColor = /fail|error|abort|mismatch/i.test(detailLabel) ? 'red-fg' : 'white-fg';
+            return `| {white-fg}{bold}${stageLabel}{/bold}{/} | {${stateColor}}${stateLabel}{/} | {${detailColor}}${detailLabel}{/} |`;
+          }
+        );
+        display = display.replace(
+          /^-\s*(💥 Root Cause|📜 Evidence|📡 Impact|🛠 Fix|✅ Healthy Signals|🔭 Watch Next):(.*)$/gm,
+          (_line, label: string, rest: string) => {
+            const details = rest.trim();
+            const formattedDetails = details ? ` {white-fg}${details}{/}` : '';
+            return `{yellow-fg}{bold}- ${label}:{/bold}{/}${formattedDetails}`;
+          }
+        );
+        display = display
+          .replace(/\b(FATAL|FAILURE|FAILED|ERROR)\b/gi, '{red-fg}{bold}$1{/bold}{/}')
+          .replace(/\b(SKIPPED|SKIP|BLOCKED)\b/gi, '{yellow-fg}$1{/}')
+          .replace(/\b(PASS(?:ED)?|SUCCESS|HEALTHY)\b/gi, '{green-fg}$1{/}');
+
+         display = display
+           .replace(/`([^`]+)`/g, '{bold}$1{/}') // highlight inline code
+           .replace(/\*\*([^*]+)\*\*/g, '{bold}$1{/}'); // basic bold support (e.g. **stderr**)
+         analysisBox.setContent(display.trim() ? display : '{gray-fg}(No output yet){/}');
+         screen.render();
+       };
+
+       const scheduleRender = () => {
+         const now = Date.now();
+         if (now - analysisLastRender > 150) {
+           analysisLastRender = now;
+           renderNow();
+         } else {
+           if (analysisUpdateTimer) clearTimeout(analysisUpdateTimer);
+           analysisUpdateTimer = setTimeout(() => { analysisLastRender = Date.now(); renderNow(); }, 180);
+         }
+       };
+
+       const appendAnalysisText = (text: string) => {
+         if (!text) { return; }
+         analysisRawMarkdown += text;
+         scheduleRender();
+       };
+
+       const stdin = aiChildProcess.stdin;
+       if (stdin) {
+         stdin.on('error', () => { /* ignore broken pipe if process exits early */ });
+         const promptStream = fs.createReadStream(promptFile);
+         promptStream.on('error', (err) => {
+           appendAnalysisText(`\n**stderr**: Failed to load prompt: ${err.message}\n`);
+           try { stdin.end(); } catch { /* ignore */ }
+         });
+         promptStream.pipe(stdin);
+       }
+
+       const seenTextChunkIds = new Set<string>();
+
+       const markTextEventProcessed = (event: any, extraIds: (string | undefined)[] = []): boolean => {
+         if (!event || typeof event !== 'object') { return false; }
+         const extra = extraIds.filter((id): id is string => typeof id === 'string' && id.length > 0);
+         const identifiers = [
+           event.part?.id,
+           event.part?.messageID,
+           event.text?.id,
+           event.text?.messageID,
+           event.messageID,
+           ...extra
+         ] as string[];
+         if (identifiers.length === 0) { return false; }
+         const alreadySeen = identifiers.some(id => seenTextChunkIds.has(id));
+         if (!alreadySeen) {
+           identifiers.forEach(id => seenTextChunkIds.add(id));
+         }
+         return alreadySeen;
+       };
+
+       const gatherText = (value: any, depth = 0, seen = new WeakSet<object>()): string => {
+         if (depth > 6 || value == null) { return ''; }
+         if (typeof value === 'string') { return value; }
+         if (typeof value === 'number') { return value.toString(); }
+         if (typeof value === 'boolean') { return value ? 'true' : ''; }
+         if (Array.isArray(value)) {
+           return value.map(v => gatherText(v, depth + 1, seen)).filter(Boolean).join('');
+         }
+         if (typeof value === 'object') {
+           if (seen.has(value)) { return ''; }
+           seen.add(value);
+
+           const priorityKeys = ['text', 'message', 'content', 'delta', 'output', 'output_text', 'arguments', 'data', 'body', 'response'];
+           let out = '';
+           for (const key of priorityKeys) {
+             if (key in value) {
+               out += gatherText((value as any)[key], depth + 1, seen);
+             }
+           }
+           if (!out) {
+             for (const key of Object.keys(value as object)) {
+               if (priorityKeys.includes(key)) { continue; }
+               out += gatherText((value as any)[key], depth + 1, seen);
+             }
+           }
+           return out;
+         }
+         return '';
+       };
+
+       const handleJsonLine = (line: string): boolean => {
+         try {
+           const event = JSON.parse(line);
+           if (!event || typeof event !== 'object') { return false; }
+
+           const type = (event.type || event.event || '').toString();
+           let handled = false;
+           let skipFallback = false;
+           let text = '';
+
+           switch (type) {
+             case 'text': {
+               if (markTextEventProcessed(event)) {
+                 skipFallback = true;
+                 break;
+               }
+               text = gatherText(event.text ?? event.part?.text ?? event.part);
+               break;
+             }
+             case 'response_delta': {
+               text = gatherText(event.delta?.delta?.content ?? event.delta?.content ?? event.delta?.text);
+               break;
+             }
+             case 'tool_call_delta':
+             case 'tool_output': {
+               text = gatherText(event.delta?.delta?.output ?? event.delta?.output ?? event.output);
+               break;
+             }
+             case 'message': {
+               text = gatherText(event.message?.content ?? event.message);
+               break;
+             }
+             case 'response': {
+               const responseIds = [
+                 event.response?.message?.id,
+                 event.response?.message?.messageID,
+                 event.response?.id
+               ];
+               if (markTextEventProcessed(event, responseIds)) {
+                 skipFallback = true;
+                 handled = true;
+                 break;
+               }
+               text = gatherText(
+                 event.response?.message?.content ??
+                 event.response?.output_text ??
+                 event.response?.content
+               );
+               break;
+             }
+             default:
+               break;
+           }
+
+           if (text) {
+             appendAnalysisText(text);
+             handled = true;
+           }
+
+           if (!handled && type === 'status' && typeof event.message === 'string') {
+             appendAnalysisText(`\n[status] ${event.message}\n`);
+             handled = true;
+             skipFallback = true;
+           }
+
+           if (!handled && /^step_/.test(type)) {
+             handled = true; // ignore step bookkeeping events
+             skipFallback = true;
+           }
+
+           if (!handled && type === 'error') {
+             const msg = event.message || event.error || line;
+             appendAnalysisText(`\n**stderr**: ${msg}\n`);
+             handled = true;
+             skipFallback = true;
+           }
+
+           return handled;
+         } catch {
+           return false;
+         }
+       };
+
+       let stdoutBuffer = '';
+       const flushStdoutBuffer = () => {
+         const remainingRaw = stdoutBuffer;
+         stdoutBuffer = '';
+         const trimmed = remainingRaw.trim();
+         if (!trimmed) { return; }
+         handleJsonLine(trimmed);
+       };
+
+       aiChildProcess.stdout.on('data', chunk => {
+         stdoutBuffer += sanitizeChunk(chunk.toString());
+         let newlineIndex: number;
+         while ((newlineIndex = stdoutBuffer.indexOf('\n')) !== -1) {
+           const line = stdoutBuffer.slice(0, newlineIndex);
+           stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+           const trimmed = line.trim();
+           if (!trimmed) { continue; }
+           handleJsonLine(trimmed);
+         }
+       });
+       aiChildProcess.stderr.on('data', chunk => {
+         appendAnalysisText(`\n**stderr**: ${sanitizeChunk(chunk.toString())}\n`);
+       });
+       aiChildProcess.on('close', code => {
+         flushStdoutBuffer();
+         if (analysisUpdateTimer) { clearTimeout(analysisUpdateTimer); analysisUpdateTimer = null; }
+         fs.unlink(promptFile, () => { /* ignore cleanup errors */ });
+         if (analysisBox) {
+           const finalLabel = ` AI Analysis (${model}) - ${code === 0 ? 'Complete' : 'Exited ('+code+')'} (ESC to close) `;
+           analysisBox.setLabel(finalLabel);
+           renderNow();
+         }
+         aiChildProcess = null;
+         setStatus(code === 0 ? '{green-fg}AI analysis complete{/}' : `{red-fg}AI analysis exited code ${code}{/}`);
+      });
+
+      (analysisBox as any).key(['escape','q','x'], () => { closeAnalysisModal(); });
+      (analysisBox as any).key(['D'], () => {
+        try {
+          const out = require('path').join(require('os').tmpdir(), 'jenkins-ai-debug-' + Date.now() + '.txt');
+          require('fs').writeFileSync(out, analysisRawMarkdown);
+          setStatus(`{yellow-fg}Dumped AI raw to ${out}{/}`);
+        } catch (e:any) {
+          setStatus(`{red-fg}Dump failed: ${e.message}{/}`);
+        }
+      });
+
+    } catch (error: any) {
+      setStatus(`{red-fg}AI analysis error: ${error.message}{/}`);
+      if (analysisBox) {
+        analysisBox.setContent(`{red-fg}Error starting analysis{/}\n\n${error.message}`);
+        screen.render();
+      }
+    }
+  };
+
+  // Key binding to trigger AI streaming analysis (auto model selection)
+  screen.key('x', () => {
+    if (isTyping() || helpBox || artifactBox || pipelineBox) return;
+    if (analysisBox) { setStatus('{yellow-fg}AI analysis already running{/}'); return; }
+    performAIAnalysis();
+  });
+
+  // Pipeline diagram view
+  screen.key('p', async () => {
+    if (isTyping() || helpBox || artifactBox || analysisBox) return;
+    await togglePipelineView();
+  });
+
   // Pane navigation shortcuts (adjusted for single-job mode)
   screen.key(['left'], () => {
     if (isTyping()) return;
-    if (artifactBox || helpBox) return; // don't steal focus
+    if (artifactBox || helpBox || pipelineBox) return; // don't steal focus
     if (singleJobMode) {
       if (logBox.focused) { buildsBox.focus(); showPaneFeedback('builds'); }
     } else {
@@ -1860,7 +2570,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   });
   screen.key(['right'], () => {
     if (isTyping()) return;
-    if (artifactBox || helpBox) return;
+    if (artifactBox || helpBox || pipelineBox) return;
     if (singleJobMode) {
       if (buildsBox.focused) { logBox.focus(); showPaneFeedback('logs'); }
     } else {
@@ -1870,9 +2580,9 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     setStatus();
     screen.render();
   });
-  screen.key('1', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !singleJobMode) { jobsBox.focus(); showPaneFeedback('jobs'); setStatus(); screen.render(); } });
-  screen.key('2', () => { if (isTyping()) return; if (!artifactBox && !helpBox) { buildsBox.focus(); showPaneFeedback('builds'); setStatus(); screen.render(); } });
-  screen.key('3', () => { if (isTyping()) return; if (!artifactBox && !helpBox) { logBox.focus(); showPaneFeedback('logs'); setStatus(); screen.render(); } });
+  screen.key('1', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox && !singleJobMode) { jobsBox.focus(); showPaneFeedback('jobs'); setStatus(); screen.render(); } });
+  screen.key('2', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox) { buildsBox.focus(); showPaneFeedback('builds'); setStatus(); screen.render(); } });
+  screen.key('3', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox) { logBox.focus(); showPaneFeedback('logs'); setStatus(); screen.render(); } });
 
   screen.key('c', () => {
     if (isTyping()) return;
@@ -1885,11 +2595,13 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   screen.key('?', () => {
     if (isTyping()) return;
     if (helpBox) { helpBox.destroy(); helpBox = null; screen.render(); return; }
-    helpBox = blessed.box({ parent: screen, width: '90%', height: '80%', top: 'center', left: 'center', border: 'line', label: ' Help ', scrollable: true, keys: true, mouse: true, tags: true, content: `{bold}Navigation & Actions{/bold}:\n{bold}q{/bold} quit   {bold}r{/bold} refresh   {bold}f{/bold} follow toggle   {bold}w{/bold} open in browser (or wrap in logs)   {bold}a{/bold} artifacts\n{bold}←/→{/bold} pane focus   {bold}1{/bold}/{bold}2{/bold}/{bold}3{/bold} jump to Jobs/Builds/Logs\n{bold}S{/bold} toggle sort asc/desc   {bold}t{/bold} toggle auto-refresh   {bold}o{/bold} folders-only\n\n{bold}Search & Filtering{/bold}:\n{bold}s{/bold} search (context-aware: jobs/builds/logs)\n{bold}b{/bold} build text filter   {bold}B{/bold} build fuzzy search\n{bold}F{/bold} cycle result filter (ALL/RUNNING/FAILED/SUCCESS)\n{bold}c{/bold} clear all filters   {bold}L{/bold} set job limit\n\n{bold}Log Search & Navigation{/bold}:\n{bold}n{/bold} next match   {bold}N{/bold} previous match   {bold}s{/bold} search in logs\n{bold}g{/bold} jump to top   {bold}G{/bold} jump to bottom\n{bold}e{/bold} jump to errors   {bold}W{/bold} jump to warnings   {bold}i{/bold} jump to info\n\n{bold}Log Bookmarks & Display{/bold}:\n{bold}m{/bold} toggle bookmark   {bold}M{/bold} next bookmark\n{bold}l{/bold} toggle line numbers   {bold}R{/bold} reverse log order (newest/oldest first)\n{bold}z{/bold} toggle fullscreen logs\n\n{bold}Enhanced Log Features{/bold}:\n• Logs show newest first by default (toggle with R)\n• Fullscreen mode (z) for focused log viewing\n• Line numbers with bookmarks (📌)\n• Syntax highlighting with emojis\n• Log level statistics and navigation\n• Visual scrollbar\n• Timestamp extraction\n• Performance optimized rendering\n\n{bold}Legend{/bold}: {yellow-fg}RUNNING{/} {green-fg}SUCCESS{/} {red-fg}FAILURE{/} {magenta-fg}UNSTABLE{/} {cyan-fg}ABORTED{/}` });
+    helpBox = blessed.box({ parent: screen, width: '90%', height: '80%', top: 'center', left: 'center', border: 'line', label: ' Help ', scrollable: true, keys: true, mouse: true, tags: true, content: `{bold}Navigation & Actions{/bold}:\n{bold}q{/bold} quit   {bold}r{/bold} refresh   {bold}f{/bold} follow toggle   {bold}w{/bold} open in browser (or wrap in logs)   {bold}a{/bold} artifacts   {bold}p{/bold} pipeline view (ASCII)\n{bold}←/→{/bold} pane focus   {bold}1{/bold}/{bold}2{/bold}/{bold}3{/bold} jump to Jobs/Builds/Logs\n{bold}S{/bold} toggle sort asc/desc   {bold}t{/bold} toggle auto-refresh   {bold}o{/bold} folders-only\n{bold}x{/bold} AI streaming analysis (requires opencode; ESC to close)\n\n{bold}Search & Filtering{/bold}:\n{bold}s{/bold} search (context-aware: jobs/builds/logs)\n{bold}b{/bold} build text filter   {bold}B{/bold} build fuzzy search\n{bold}F{/bold} cycle result filter (ALL/RUNNING/FAILED/SUCCESS)\n{bold}c{/bold} clear all filters   {bold}L{/bold} set job limit\n\n{bold}Log Search & Navigation{/bold}:\n{bold}n{/bold} next match   {bold}N{/bold} previous match   {bold}s{/bold} search in logs\n{bold}g{/bold} jump to top   {bold}G{/bold} jump to bottom\n{bold}e{/bold} jump to errors   {bold}W{/bold} jump to warnings   {bold}i{/bold} jump to info\n\n{bold}Log Bookmarks & Display{/bold}:\n{bold}m{/bold} toggle bookmark   {bold}M{/bold} next bookmark\n{bold}l{/bold} toggle line numbers   {bold}R{/bold} reverse log order (newest/oldest first)\n{bold}z{/bold} toggle fullscreen logs\n\n{bold}Enhanced Log Features{/bold}:\n• Logs show newest first by default (toggle with R)\n• Fullscreen mode (z) for focused log viewing\n• AI-powered log analysis (x) with opencode\n• Pipeline tree (p) shows stage status diagram\n• Line numbers with bookmarks (📌)\n• Syntax highlighting with emojis\n• Log level statistics and navigation\n• Visual scrollbar\n• Timestamp extraction\n• Performance optimized rendering\n\n{bold}Legend{/bold}: {yellow-fg}RUNNING{/} {green-fg}SUCCESS{/} {red-fg}FAILURE{/} {magenta-fg}UNSTABLE{/} {cyan-fg}ABORTED{/}` });
     helpBox.key(['q','escape','?'], () => { if (helpBox) { helpBox.destroy(); helpBox = null; screen.render(); } });
     screen.render();
   });
   screen.key('escape', () => {
+    // If AI analysis is active, restore original logs immediately.
+    if (analysisBox) { closeAnalysisModal(); return; }
     if (isClassicTypingActive()) {
       deactivateClassicTyping();
     }

@@ -114,7 +114,7 @@ export class JenkinsClient {
             buildNumber = number;
         }
         // Request actions to get user/cause information
-        return this._request(`job/${encodeURIComponent(job)}/${buildNumber}/api/json?tree=*,actions[*,causes[*]]`);
+        return this._request(`job/${encodeURIComponent(job)}/${buildNumber}/api/json`);
     }
     async getConsoleText(job, buildNumber) {
         if (!buildNumber) {
@@ -228,7 +228,7 @@ export class JenkinsClient {
     }
     async listBuilds(job, limit = 10) {
         const jobInfo = await this.getJob(job);
-        const refs = jobInfo.builds || [];
+        const refs = (jobInfo.builds || []).map(b => (typeof b === 'number' ? { number: b } : b));
         const recent = refs.slice(0, limit);
         const detailed = [];
         for (const ref of recent) {
