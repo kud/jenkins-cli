@@ -280,6 +280,8 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   let analysisLastRender = 0; // last render timestamp
   let pipelineBox: Widgets.BoxElement | null = null; // pipeline diagram modal
   let pipelineLoading = false;
+  let buildActionBusy = false; // prevent concurrent stop/restart
+  let actionBox: Widgets.ListElement | null = null; // build actions modal
   type InputMode = 'none' | 'classic' | 'job-search' | 'build-filter' | 'build-search' | 'log-search';
   let inputMode: InputMode = 'none';
   let classicTypingMode = false;
@@ -306,7 +308,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     if (inputMode === 'classic') inputMode = 'none';
   };
 
-  const isClassicTypingContext = () => (jobsBox.focused || buildsBox.focused) && !helpBox && !artifactBox && !pipelineBox && !artifactMode;
+  const isClassicTypingContext = () => (jobsBox.focused || buildsBox.focused) && !helpBox && !artifactBox && !pipelineBox && !actionBox && !artifactMode;
   const isClassicTypingActive = () => classicTypingMode && isClassicTypingContext();
 
   // Add visual feedback when switching panes
@@ -1099,6 +1101,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     if (!currentJob || !num) return;
 
     if (pipelineBox) { closePipelineModal({ silent: true }); }
+    if (actionBox) { closeActionModal({ silent: true }); }
     logCurrentBuild = num;
     
     // Update metadata box (will be called again after logs load to include stats)
@@ -1386,6 +1389,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     
     currentJob = selectedJob.name;
     if (pipelineBox) { closePipelineModal({ silent: true }); }
+    if (actionBox) { closeActionModal({ silent: true }); }
     
     // Check if this job has an error
     if (selectedJob.error) {
@@ -1467,11 +1471,12 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     }
     currentJob = filteredJobs[0]?.name || null;
     if (pipelineBox) { closePipelineModal({ silent: true }); }
+    if (actionBox) { closeActionModal({ silent: true }); }
     screen.render();
   };
 
   const startJobSearch = () => {
-    if (singleJobMode || (helpBox || artifactBox || pipelineBox)) return;
+    if (singleJobMode || (helpBox || artifactBox || pipelineBox || actionBox)) return;
     searchMode = true;
     buildFilterMode = false;
     buildSearchMode = false;
@@ -1640,7 +1645,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   
   // Open job/build in browser or toggle wrap (logs focused)
   screen.key('w', async () => {
-    if (isTyping() || helpBox || artifactBox || pipelineBox) return;
+    if (isTyping() || helpBox || artifactBox || pipelineBox || actionBox) return;
     if (logBox.focused) {
       logWrapMode = !logWrapMode;
       setStatus(`{yellow-fg}Word wrap toggle noted (${logWrapMode ? 'ON' : 'OFF'}) - refresh logs to apply{/}`);
@@ -1676,7 +1681,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   screen.key('a', async () => { if (isTyping()) return; await showArtifacts(); });
   // Change job limit
   screen.key(['L', 'S-l'], () => {
-    if (isTyping() || helpBox || artifactBox || pipelineBox) return;
+    if (isTyping() || helpBox || artifactBox || pipelineBox || actionBox) return;
     let promptBox = blessed.box({ parent: screen, top: 'center', left: 'center', width: '40%', height: 5, border: 'line', label: ' Job Limit ', tags: true, content: 'Enter job limit (0 = unlimited):' });
     const input = blessed.textbox({ parent: promptBox, top: 2, left: 1, width: '90%', height: 1, inputOnFocus: true, keys: true, mouse: true, border: 'line' });
     input.on('submit', async (val) => {
@@ -1709,7 +1714,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
 
   // Build search modes
   screen.key('b', () => {
-    if (helpBox || artifactBox || pipelineBox) return;
+    if (helpBox || artifactBox || pipelineBox || actionBox) return;
     if (inputMode === 'classic') deactivateClassicTyping();
     if (isTyping()) return;
     if (!buildsBox.focused) { setStatus('{gray-fg}Focus the Builds panel to search builds{/}', { suppressShortcuts: true }); return; }
@@ -1718,7 +1723,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
 
   // Enhanced build search (uppercase B for fuzzy search)
   screen.key(['B', 'S-b'], () => {
-    if (helpBox || artifactBox || pipelineBox) return;
+    if (helpBox || artifactBox || pipelineBox || actionBox) return;
     if (inputMode === 'classic') deactivateClassicTyping();
     if (isTyping()) return;
     if (!buildsBox.focused) { setStatus('{gray-fg}Focus the Builds panel to search builds{/}', { suppressShortcuts: true }); return; }
@@ -1738,7 +1743,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
 
   // Contextual search (explicit via 's')
   screen.key('s', () => {
-    if (helpBox || artifactBox || pipelineBox) return;
+    if (helpBox || artifactBox || pipelineBox || actionBox) return;
     if (inputMode === 'classic') deactivateClassicTyping();
     if (isTyping()) return;
     if (!singleJobMode && jobsBox.focused) {
@@ -1829,7 +1834,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
 
   // Toggle fullscreen logs (works from any column)
   screen.key('z', () => {
-    if (isTyping() || helpBox || artifactBox || pipelineBox) return;
+    if (isTyping() || helpBox || artifactBox || pipelineBox || actionBox) return;
     
     logFullscreen = !logFullscreen;
     
@@ -1910,19 +1915,30 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     screen.render();
   };
 
-  const closePipelineModal = (options: { silent?: boolean } = {}) => {
-    if (pipelineBox) {
-      pipelineBox.destroy();
-      pipelineBox = null;
-    }
-    pipelineLoading = false;
-    if (!options.silent) {
-      setStatus('{gray-fg}Pipeline view closed{/}');
-    }
-    screen.render();
-  };
+const closePipelineModal = (options: { silent?: boolean } = {}) => {
+  if (pipelineBox) {
+    (pipelineBox as any).destroy();
+    pipelineBox = null;
+  }
+  pipelineLoading = false;
+  if (!options.silent) {
+    setStatus('{gray-fg}Pipeline view closed{/}');
+  }
+  screen.render();
+};
 
-  const safeText = (value: unknown): string => {
+const closeActionModal = (options: { silent?: boolean } = {}) => {
+  if (actionBox) {
+    (actionBox as any).destroy();
+    actionBox = null;
+  }
+  if (!options.silent) {
+    setStatus('{gray-fg}Actions menu closed{/}');
+  }
+  screen.render();
+};
+
+const safeText = (value: unknown): string => {
     const text = value == null ? '' : String(value);
     const helpers = (blessed as any)?.helpers;
     if (helpers && typeof helpers.escape === 'function') {
@@ -2076,6 +2092,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
       closePipelineModal();
       return;
     }
+    if (actionBox) { closeActionModal({ silent: true }); }
     if (!currentJob) {
       setStatus('{yellow-fg}Select a job to view its pipeline{/}');
       return;
@@ -2129,6 +2146,108 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
       pipelineLoading = false;
       screen.render();
     }
+  };
+
+  const stopCurrentBuild = async () => {
+    if (buildActionBusy) { setStatus('{yellow-fg}Another build action in progress{/}'); return; }
+    if (!currentJob || !logCurrentBuild) { setStatus('{yellow-fg}Select a running build to stop{/}'); return; }
+    const currentBuild = builds.find(b => b.number === logCurrentBuild);
+    if (!currentBuild) { setStatus('{red-fg}Build not found in list{/}'); return; }
+    if (!currentBuild.building) {
+      setStatus('{yellow-fg}Build is not running; nothing to stop{/}');
+      return;
+    }
+    buildActionBusy = true;
+    try {
+      setStatus(`{cyan-fg}Stopping build #${logCurrentBuild}...{/}`, { suppressShortcuts: true });
+      await client.stopBuild(currentJob, logCurrentBuild);
+      setStatus(`{green-fg}Stop requested for #${logCurrentBuild}{/}`);
+      await refreshBuilds();
+    } catch (error: any) {
+      setStatus(`{red-fg}Stop failed: ${error.message}{/}`);
+    } finally {
+      buildActionBusy = false;
+    }
+  };
+
+  const rerunCurrentJob = async () => {
+    if (buildActionBusy) { setStatus('{yellow-fg}Another build action in progress{/}'); return; }
+    if (!currentJob) { setStatus('{yellow-fg}Select a job to rerun{/}'); return; }
+    buildActionBusy = true;
+    try {
+      setStatus(`{cyan-fg}Triggering new build for ${currentJob}...{/}`, { suppressShortcuts: true });
+      await client.triggerBuild(currentJob);
+      setStatus(`{green-fg}Build queued for ${currentJob}{/}`);
+      await refreshBuilds();
+    } catch (error: any) {
+      setStatus(`{red-fg}Rerun failed: ${error.message}{/}`);
+    } finally {
+      buildActionBusy = false;
+    }
+  };
+
+  const openActionsMenu = () => {
+    if (actionBox) {
+      closeActionModal({ silent: true });
+      return;
+    }
+    if (!currentJob) {
+      setStatus('{yellow-fg}Select a job to manage actions{/}');
+      return;
+    }
+    const currentBuild = logCurrentBuild ? builds.find(b => b.number === logCurrentBuild) : null;
+    const actions: Array<{ id: 'stop' | 'rerun'; label: string; disabled?: boolean }> = [];
+    if (currentBuild && currentBuild.building) {
+      actions.push({ id: 'stop', label: `Stop running build #${currentBuild.number}` });
+    }
+    actions.push({ id: 'rerun', label: `Queue new build for ${currentJob}` });
+    const items = actions.length
+      ? actions.map(a => a.disabled ? `{gray-fg}${a.label}{/}` : `{white-fg}${a.label}{/}`)
+      : ['{gray-fg}No actions available{/}'];
+
+    if (pipelineBox) { closePipelineModal({ silent: true }); }
+    if (helpBox) {
+      (helpBox as any).destroy();
+      helpBox = null;
+    }
+    actionBox = blessed.list({
+      parent: screen,
+      width: '60%',
+      height: actions.length > 0 ? Math.min(actions.length + 4, 10) : 6,
+      top: 'center',
+      left: 'center',
+      border: 'line',
+      label: ` Actions for ${currentJob}${currentBuild ? ` #${currentBuild.number}` : ''} `,
+      keys: true,
+      mouse: true,
+      tags: true,
+      vi: true,
+      scrollable: true,
+      style: {
+        selected: { bg: 'blue', fg: 'white' },
+        item: { fg: 'white' },
+        border: { fg: 'green' },
+        label: { fg: 'green', bold: true }
+      },
+      items
+    });
+
+    (actionBox as any)._actions = actions;
+    (actionBox as any).key(['escape', 'q'], () => { closeActionModal(); });
+    actionBox.on('select', async (_item, idx) => {
+      const selected = actions[idx];
+      if (!selected) { closeActionModal({ silent: true }); return; }
+      closeActionModal({ silent: true });
+      if (selected.id === 'stop') {
+        await stopCurrentBuild();
+      } else if (selected.id === 'rerun') {
+        await rerunCurrentJob();
+      }
+    });
+    actionBox.on('destroy', () => { actionBox = null; });
+    actionBox.focus();
+    screen.render();
+    setStatus('{cyan-fg}Select an action (Enter or ESC){/}', { suppressShortcuts: true });
   };
 
   const performAIAnalysis = async (model?: string) => {
@@ -2544,21 +2663,26 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
 
   // Key binding to trigger AI streaming analysis (auto model selection)
   screen.key('x', () => {
-    if (isTyping() || helpBox || artifactBox || pipelineBox) return;
+    if (isTyping() || helpBox || artifactBox || pipelineBox || actionBox) return;
     if (analysisBox) { setStatus('{yellow-fg}AI analysis already running{/}'); return; }
     performAIAnalysis();
   });
 
+  screen.key(['C-a'], () => {
+    if (isTyping() || helpBox || artifactBox || pipelineBox || actionBox || analysisBox) return;
+    openActionsMenu();
+  });
+
   // Pipeline diagram view
   screen.key('p', async () => {
-    if (isTyping() || helpBox || artifactBox || analysisBox) return;
+    if (isTyping() || helpBox || artifactBox || pipelineBox || actionBox || analysisBox) return;
     await togglePipelineView();
   });
 
   // Pane navigation shortcuts (adjusted for single-job mode)
   screen.key(['left'], () => {
     if (isTyping()) return;
-    if (artifactBox || helpBox || pipelineBox) return; // don't steal focus
+    if (artifactBox || helpBox || pipelineBox || actionBox) return; // don't steal focus
     if (singleJobMode) {
       if (logBox.focused) { buildsBox.focus(); showPaneFeedback('builds'); }
     } else {
@@ -2570,7 +2694,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   });
   screen.key(['right'], () => {
     if (isTyping()) return;
-    if (artifactBox || helpBox || pipelineBox) return;
+    if (artifactBox || helpBox || pipelineBox || actionBox) return;
     if (singleJobMode) {
       if (buildsBox.focused) { logBox.focus(); showPaneFeedback('logs'); }
     } else {
@@ -2580,9 +2704,9 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     setStatus();
     screen.render();
   });
-  screen.key('1', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox && !singleJobMode) { jobsBox.focus(); showPaneFeedback('jobs'); setStatus(); screen.render(); } });
-  screen.key('2', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox) { buildsBox.focus(); showPaneFeedback('builds'); setStatus(); screen.render(); } });
-  screen.key('3', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox) { logBox.focus(); showPaneFeedback('logs'); setStatus(); screen.render(); } });
+  screen.key('1', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox && !actionBox && !singleJobMode) { jobsBox.focus(); showPaneFeedback('jobs'); setStatus(); screen.render(); } });
+  screen.key('2', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox && !actionBox) { buildsBox.focus(); showPaneFeedback('builds'); setStatus(); screen.render(); } });
+  screen.key('3', () => { if (isTyping()) return; if (!artifactBox && !helpBox && !pipelineBox && !actionBox) { logBox.focus(); showPaneFeedback('logs'); setStatus(); screen.render(); } });
 
   screen.key('c', () => {
     if (isTyping()) return;
@@ -2595,13 +2719,50 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
   screen.key('?', () => {
     if (isTyping()) return;
     if (helpBox) { helpBox.destroy(); helpBox = null; screen.render(); return; }
-    helpBox = blessed.box({ parent: screen, width: '90%', height: '80%', top: 'center', left: 'center', border: 'line', label: ' Help ', scrollable: true, keys: true, mouse: true, tags: true, content: `{bold}Navigation & Actions{/bold}:\n{bold}q{/bold} quit   {bold}r{/bold} refresh   {bold}f{/bold} follow toggle   {bold}w{/bold} open in browser (or wrap in logs)   {bold}a{/bold} artifacts   {bold}p{/bold} pipeline view (ASCII)\n{bold}←/→{/bold} pane focus   {bold}1{/bold}/{bold}2{/bold}/{bold}3{/bold} jump to Jobs/Builds/Logs\n{bold}S{/bold} toggle sort asc/desc   {bold}t{/bold} toggle auto-refresh   {bold}o{/bold} folders-only\n{bold}x{/bold} AI streaming analysis (requires opencode; ESC to close)\n\n{bold}Search & Filtering{/bold}:\n{bold}s{/bold} search (context-aware: jobs/builds/logs)\n{bold}b{/bold} build text filter   {bold}B{/bold} build fuzzy search\n{bold}F{/bold} cycle result filter (ALL/RUNNING/FAILED/SUCCESS)\n{bold}c{/bold} clear all filters   {bold}L{/bold} set job limit\n\n{bold}Log Search & Navigation{/bold}:\n{bold}n{/bold} next match   {bold}N{/bold} previous match   {bold}s{/bold} search in logs\n{bold}g{/bold} jump to top   {bold}G{/bold} jump to bottom\n{bold}e{/bold} jump to errors   {bold}W{/bold} jump to warnings   {bold}i{/bold} jump to info\n\n{bold}Log Bookmarks & Display{/bold}:\n{bold}m{/bold} toggle bookmark   {bold}M{/bold} next bookmark\n{bold}l{/bold} toggle line numbers   {bold}R{/bold} reverse log order (newest/oldest first)\n{bold}z{/bold} toggle fullscreen logs\n\n{bold}Enhanced Log Features{/bold}:\n• Logs show newest first by default (toggle with R)\n• Fullscreen mode (z) for focused log viewing\n• AI-powered log analysis (x) with opencode\n• Pipeline tree (p) shows stage status diagram\n• Line numbers with bookmarks (📌)\n• Syntax highlighting with emojis\n• Log level statistics and navigation\n• Visual scrollbar\n• Timestamp extraction\n• Performance optimized rendering\n\n{bold}Legend{/bold}: {yellow-fg}RUNNING{/} {green-fg}SUCCESS{/} {red-fg}FAILURE{/} {magenta-fg}UNSTABLE{/} {cyan-fg}ABORTED{/}` });
+    helpBox = blessed.box({ parent: screen, width: '90%', height: '80%', top: 'center', left: 'center', border: 'line', label: ' Help ', scrollable: true, keys: true, mouse: true, tags: true, content: `{bold}Navigation & Actions{/bold}:
+{bold}q{/bold} quit   {bold}r{/bold} refresh   {bold}f{/bold} follow toggle   {bold}w{/bold} open in browser (or wrap in logs)   {bold}a{/bold} artifacts   {bold}p{/bold} pipeline view (ASCII)
+{bold}Ctrl+A{/bold} build actions menu
+{bold}←/→{/bold} pane focus   {bold}1{/bold}/{bold}2{/bold}/{bold}3{/bold} jump to Jobs/Builds/Logs
+{bold}S{/bold} toggle sort asc/desc   {bold}t{/bold} toggle auto-refresh   {bold}o{/bold} folders-only
+{bold}x{/bold} AI streaming analysis (requires opencode; ESC to close)
+
+{bold}Search & Filtering{/bold}:
+{bold}s{/bold} search (context-aware: jobs/builds/logs)
+{bold}b{/bold} build text filter   {bold}B{/bold} build fuzzy search
+{bold}F{/bold} cycle result filter (ALL/RUNNING/FAILED/SUCCESS)
+{bold}c{/bold} clear all filters   {bold}L{/bold} set job limit
+
+{bold}Log Search & Navigation{/bold}:
+{bold}n{/bold} next match   {bold}N{/bold} previous match   {bold}s{/bold} search in logs
+{bold}g{/bold} jump to top   {bold}G{/bold} jump to bottom
+{bold}e{/bold} jump to errors   {bold}W{/bold} jump to warnings   {bold}i{/bold} jump to info
+
+{bold}Log Bookmarks & Display{/bold}:
+{bold}m{/bold} toggle bookmark   {bold}M{/bold} next bookmark
+{bold}l{/bold} toggle line numbers   {bold}R{/bold} reverse log order (newest/oldest first)
+{bold}z{/bold} toggle fullscreen logs
+
+{bold}Enhanced Features{/bold}:
+• Logs show newest first by default (toggle with R)
+• Fullscreen mode (z) for focused log viewing
+• AI-powered log analysis (x) with opencode
+• Build actions (Ctrl+A) to stop or rerun
+• Pipeline tree (p) shows stage status diagram
+• Line numbers with bookmarks (📌)
+• Syntax highlighting with emojis
+• Log level statistics and navigation
+• Visual scrollbar
+• Timestamp extraction
+• Performance optimized rendering
+
+{bold}Legend{/bold}: {yellow-fg}RUNNING{/} {green-fg}SUCCESS{/} {red-fg}FAILURE{/} {magenta-fg}UNSTABLE{/} {cyan-fg}ABORTED{/}` });
     helpBox.key(['q','escape','?'], () => { if (helpBox) { helpBox.destroy(); helpBox = null; screen.render(); } });
     screen.render();
   });
   screen.key('escape', () => {
     // If AI analysis is active, restore original logs immediately.
     if (analysisBox) { closeAnalysisModal(); return; }
+    if (actionBox) { closeActionModal(); return; }
     if (isClassicTypingActive()) {
       deactivateClassicTyping();
     }
