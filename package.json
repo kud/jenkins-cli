@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsc -p .",
     "dev": "tsx bin/jenkins-cli.ts",
-    "test": "node --test",
+    "test": "npm run build --silent && node --test dist/test/*.js",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

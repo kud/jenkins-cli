@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
+import { resolveFromDist } from './helpers/ts-imports.js';
 
 // Use isolated home directory before importing config module
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'jenkins-cli-home-'));
 process.env.HOME = tempHome; // posix
 process.env.USERPROFILE = tempHome; // windows fallback
 
-const cfgMod = await import('../src/config.js');
+const cfgMod = await import(resolveFromDist('src/config.js'));
 const { addServer, listServers, useServer, removeServer, loadConfig } = cfgMod;
 
 test('multi-server add/use/remove lifecycle', async () => {

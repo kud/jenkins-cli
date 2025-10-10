@@ -132,9 +132,10 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         top: 0,
         left: singleJobMode ? '30%' : '40%',
         width: singleJobMode ? '70%' : '60%',
-        height: 4,
+        height: 6,
         border: 'line',
         tags: true,
+        wrap: true,
         style: {
             fg: 'white',
             border: { fg: 'cyan' },
@@ -146,10 +147,10 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
     const logBox = blessed.box({
         parent: screen,
         label: ' Logs ',
-        top: 4,
+        top: 6,
         left: singleJobMode ? '30%' : '40%',
         width: singleJobMode ? '70%' : '60%',
-        height: '100%-7', // Adjusted for metadata box above
+        height: '100%-9', // Adjusted for metadata box above
         scrollable: true,
         alwaysScroll: true,
         mouse: true,
@@ -205,7 +206,8 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
     let abortController = null;
     let searchMode = false; // legacy slash mode retained
     let searchQuery = '';
-    let incrementalQuery = '';
+    let buildFilterMode = false;
+    // removed incremental job search state
     let buildSearchMode = false;
     let buildSearchQuery = '';
     let logSearchMode = false;
@@ -214,6 +216,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
     let logSearchIndex = -1;
     let logBookmarks = []; // Store bookmarked line numbers
     let logLines = []; // Store processed log lines for better navigation
+    let logRawText = ''; // Store original unprocessed log text
     let showLineNumbers = true;
     let logWrapMode = false;
     let logCurrentBuild = null;
@@ -228,6 +231,35 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
     let autoRefreshTimer = null;
     let foldersOnly = false;
     let feedbackTimeout = null; // For visual feedback
+    let logReversed = true; // Default: newest logs first
+    let logFullscreen = false; // Track fullscreen state
+    let inputMode = 'none';
+    let classicTypingMode = false;
+    let classicTypingTimer = null;
+    const CLASSIC_TYPING_RESET_MS = 1000;
+    // removed incrementalSearchEnabled (legacy incremental job search removed)
+    const activateClassicTyping = () => {
+        if (!isClassicTypingContext())
+            return;
+        classicTypingMode = true;
+        inputMode = 'classic';
+        if (classicTypingTimer)
+            clearTimeout(classicTypingTimer);
+        classicTypingTimer = setTimeout(() => {
+            deactivateClassicTyping();
+        }, CLASSIC_TYPING_RESET_MS);
+    };
+    const deactivateClassicTyping = () => {
+        if (classicTypingTimer) {
+            clearTimeout(classicTypingTimer);
+            classicTypingTimer = null;
+        }
+        classicTypingMode = false;
+        if (inputMode === 'classic')
+            inputMode = 'none';
+    };
+    const isClassicTypingContext = () => (jobsBox.focused || buildsBox.focused) && !helpBox && !artifactBox && !artifactMode;
+    const isClassicTypingActive = () => classicTypingMode && isClassicTypingContext();
     // Add visual feedback when switching panes
     const showPaneFeedback = (pane) => {
         if (feedbackTimeout)
@@ -283,11 +315,6 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
             .replace(/\u2028/g, '\n') // Line separator
             .replace(/\u2029/g, '\n') // Paragraph separator
             .replace(/\uFEFF/g, '') // Byte order mark
-            // Remove terminal control sequences (more comprehensive)
-            .replace(/\x1b\[[0-9;]*m/g, '') // ANSI color codes
-            .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '') // Other ANSI sequences
-            .replace(/\x1b\[[HfABCDEFGJKSTuvwxyl]/g, '') // Cursor positioning
-            .replace(/\x1b\[[\d;]*[HfABCDEFGJKST]/g, '') // More cursor controls
             // Remove carriage returns and normalize line endings
             .replace(/\r\n/g, '\n')
             .replace(/\r/g, '\n')
@@ -320,8 +347,10 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
                 isBookmarked: logBookmarks.includes(lineNumber)
             };
         });
-        const formattedContent = formatLogsForDisplay(processedLines);
-        return { lines: processedLines, formattedContent };
+        // Reverse the order if logReversed is true (newest lines first)
+        const displayLines = logReversed ? [...processedLines].reverse() : processedLines;
+        const formattedContent = formatLogsForDisplay(displayLines);
+        return { lines: displayLines, formattedContent };
     };
     const extractTimestamp = (line) => {
         // Extract various timestamp formats
@@ -345,7 +374,8 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         return processedLines.map(line => {
             let formattedLine = line.content;
             // Apply syntax highlighting
-            formattedLine = formatLogsChunk(formattedLine);
+            formattedLine = ansiToBlessed(formatLogsChunk(formattedLine));
+            formattedLine = cleanLogContent(formattedLine);
             // Add line numbers if enabled
             if (showLineNumbers) {
                 const lineNum = String(line.number).padStart(4, ' ');
@@ -427,26 +457,211 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         result += text.slice(lastIndex);
         return result;
     };
-    const buildStatusLine = (prefix = '') => {
-        const resFilter = resultFilterStates[resultFilterIdx];
-        const parts = [prefix, `{bold}q{/bold} quit`, `{bold}r{/bold} refresh`, `{bold}w{/bold} web`, `{bold}f{/bold} follow:${follow ? '{green-fg}ON{/}' : 'OFF'}`, `{bold}F{/bold} result:${resFilter}`, `{bold}o{/bold} folders:${foldersOnly ? '{green-fg}ON{/}' : 'OFF'}`];
-        // Show active searches
-        if (buildTextFilter || buildSearchQuery)
-            parts.push(`build:"${buildTextFilter || buildSearchQuery}"`);
-        if (searchQuery || incrementalQuery)
-            parts.push(`job:"${searchQuery || incrementalQuery}"`);
-        if (logSearchQuery)
-            parts.push(`log:"${logSearchQuery}"`);
-        // Add search hints
-        if (searchMode)
-            parts.push('{dim}(typing...){/}');
-        if (buildSearchMode)
-            parts.push('{dim}(build search){/}');
-        if (logSearchMode)
-            parts.push('{dim}(log search){/}');
-        return parts.filter(Boolean).join(' | ');
+    const ansiToBlessed = (text) => {
+        if (!text || (text.indexOf('\x1b') === -1 && !/\[[0-9;]*m/.test(text)))
+            return text;
+        const stack = [];
+        const openTag = (tag) => `{${tag}}`;
+        const closeTag = (tag) => `{/${tag}}`;
+        const applyCode = (code) => {
+            switch (code) {
+                case 0:
+                    return stack.reverse().map(closeTag).join('') + (stack.length = 0, '');
+                case 1:
+                    stack.push('bold');
+                    return openTag('bold');
+                case 2:
+                    stack.push('dim');
+                    return openTag('dim');
+                case 3:
+                    stack.push('italic');
+                    return openTag('italic');
+                case 4:
+                    stack.push('underline');
+                    return openTag('underline');
+                case 7:
+                    stack.push('inverse');
+                    return openTag('inverse');
+                case 9:
+                    stack.push('strike');
+                    return openTag('strike');
+                case 21:
+                case 22:
+                    return popUntil(['bold', 'dim']);
+                case 23:
+                    return popUntil(['italic']);
+                case 24:
+                    return popUntil(['underline']);
+                case 27:
+                    return popUntil(['inverse']);
+                case 29:
+                    return popUntil(['strike']);
+                default:
+                    if (code >= 30 && code <= 37 || code >= 90 && code <= 97) {
+                        return setColor('fg', code);
+                    }
+                    if (code >= 40 && code <= 47 || code >= 100 && code <= 107) {
+                        return setColor('bg', code);
+                    }
+                    if (code === 39)
+                        return setColor('fg', null);
+                    if (code === 49)
+                        return setColor('bg', null);
+                    return '';
+            }
+        };
+        const fgMap = {
+            30: 'black-fg', 31: 'red-fg', 32: 'green-fg', 33: 'yellow-fg',
+            34: 'blue-fg', 35: 'magenta-fg', 36: 'cyan-fg', 37: 'white-fg',
+            90: 'gray-fg', 91: 'red-fg', 92: 'green-fg', 93: 'yellow-fg',
+            94: 'blue-fg', 95: 'magenta-fg', 96: 'cyan-fg', 97: 'white-fg'
+        };
+        const bgMap = {
+            40: 'black-bg', 41: 'red-bg', 42: 'green-bg', 43: 'yellow-bg',
+            44: 'blue-bg', 45: 'magenta-bg', 46: 'cyan-bg', 47: 'white-bg',
+            100: 'gray-bg', 101: 'red-bg', 102: 'green-bg', 103: 'yellow-bg',
+            104: 'blue-bg', 105: 'magenta-bg', 106: 'cyan-bg', 107: 'white-bg'
+        };
+        const setColor = (type, code) => {
+            const map = type === 'fg' ? fgMap : bgMap;
+            const tag = code === null ? null : map[code];
+            let output = '';
+            for (let i = stack.length - 1; i >= 0; i--) {
+                if (stack[i].endsWith('-fg') && type === 'fg' || stack[i].endsWith('-bg') && type === 'bg') {
+                    output += closeTag(stack[i]);
+                    stack.splice(i, 1);
+                    break;
+                }
+            }
+            if (tag) {
+                stack.push(tag);
+                output += openTag(tag);
+            }
+            return output;
+        };
+        const popUntil = (tags) => {
+            let output = '';
+            for (let i = stack.length - 1; i >= 0; i--) {
+                if (tags.includes(stack[i])) {
+                    output += closeTag(stack[i]);
+                    stack.splice(i, 1);
+                    break;
+                }
+            }
+            return output;
+        };
+        const processSequence = (seq) => {
+            if (seq === '')
+                return applyCode(0);
+            const fragments = seq.split(/[m;]/).filter(Boolean);
+            if (fragments.length === 0)
+                return applyCode(0);
+            return fragments.map(f => {
+                const num = Number(f);
+                return Number.isFinite(num) ? applyCode(num) : '';
+            }).join('');
+        };
+        let converted = text.replace(/\x1b\[([0-9;]*)m/g, (_match, seq) => processSequence(seq));
+        converted = converted.replace(/\[([0-9;]*)m/g, (_match, seq) => processSequence(seq));
+        if (stack.length > 0) {
+            const closing = stack.slice().reverse().map(closeTag).join('');
+            stack.length = 0;
+            return converted + closing;
+        }
+        return converted;
     };
     const focusedPane = () => (singleJobMode || !jobsBox.focused) ? (buildsBox.focused ? 'BUILDS' : 'LOGS') : 'JOBS';
+    const stripBlessedTags = (value) => value.replace(/\{[^}]+\}/g, '');
+    const padBlessed = (value, width) => {
+        const plain = stripBlessedTags(value);
+        if (plain.length < width) {
+            return value + ' '.repeat(width - plain.length);
+        }
+        let result = '';
+        let plainCount = 0;
+        let i = 0;
+        while (i < value.length && plainCount < width) {
+            if (value[i] === '{') {
+                const end = value.indexOf('}', i);
+                if (end === -1)
+                    break;
+                result += value.slice(i, end + 1);
+                i = end + 1;
+            }
+            else {
+                result += value[i];
+                plainCount++;
+                i++;
+            }
+        }
+        // Append any trailing closing tags to keep formatting balanced
+        while (i < value.length) {
+            if (value[i] === '{') {
+                const end = value.indexOf('}', i);
+                if (end === -1)
+                    break;
+                const tag = value.slice(i, end + 1);
+                if (/^\{\/.*\}$/.test(tag)) {
+                    result += tag;
+                }
+                i = end + 1;
+            }
+            else {
+                break;
+            }
+        }
+        return result;
+    };
+    const shortcutHints = () => {
+        const segments = [];
+        // Current panel indicator FIRST
+        const pane = focusedPane();
+        segments.push(`{bold}{white-bg}{black-fg} ${pane} {/}`);
+        // SEARCH section - always show, with active state if typing
+        let searchSection = '';
+        if (inputMode === 'job-search') {
+            const matchInfo = filteredJobs.length !== jobs.length ? ` (${filteredJobs.length}/${jobs.length})` : '';
+            searchSection = `{yellow-bg}{black-fg} s SEARCH ${searchQuery}${matchInfo} {/}`;
+        }
+        else if (inputMode === 'build-filter' || inputMode === 'build-search') {
+            const matchInfo = filteredBuilds.length !== builds.length ? ` (${filteredBuilds.length}/${builds.length})` : '';
+            searchSection = `{yellow-bg}{black-fg} s SEARCH ${buildTextFilter || buildSearchQuery}${matchInfo} {/}`;
+        }
+        else if (inputMode === 'log-search') {
+            const matchInfo = logSearchMatches.length > 0 ? ` (${logSearchMatches.length})` : '';
+            searchSection = `{yellow-bg}{black-fg} s SEARCH ${logSearchQuery}${matchInfo} {/}`;
+        }
+        else {
+            searchSection = `{gray-fg}s{/} SEARCH`;
+        }
+        segments.push(searchSection);
+        // Other booleans - always show
+        const shortcuts = [];
+        shortcuts.push(follow ? `{green-bg}{black-fg} f FOLLOW ON {/}` : `{gray-fg}f{/} FOLLOW`);
+        const resFilter = resultFilterStates[resultFilterIdx];
+        if (resFilter !== 'ALL')
+            shortcuts.push(`{gray-fg}F{/} FILTER {yellow-fg}${resFilter}{/}`);
+        if (foldersOnly)
+            shortcuts.push(`{gray-fg}o{/} {cyan-fg}FOLDERS{/}`);
+        shortcuts.push(`{gray-fg}?{/} HELP`);
+        segments.push(shortcuts.join(' '));
+        // Build stats at the end (if we have a build selected)
+        if (pane === 'LOGS' && logLines.length > 0) {
+            const stats = {
+                total: logLines.length,
+                errors: logLines.filter(l => l.level === 'ERROR' || l.level === 'FATAL').length,
+                warnings: logLines.filter(l => l.level === 'WARN' || l.level === 'WARNING').length
+            };
+            const statParts = [];
+            statParts.push(`{gray-fg}${stats.total} lines{/}`);
+            if (stats.errors > 0)
+                statParts.push(`{red-fg}${stats.errors} errors{/}`);
+            if (stats.warnings > 0)
+                statParts.push(`{yellow-fg}${stats.warnings} warnings{/}`);
+            segments.push(statParts.join(' '));
+        }
+        return segments;
+    };
     const updatePaneIndicators = () => {
         if (!singleJobMode) {
             jobsBox.setLabel(jobsBox.focused ? '{bold}{cyan-bg}{black-fg} Jobs * {/}' : '{bold}{cyan-fg} Jobs {/}');
@@ -456,11 +671,18 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         logBox.setLabel(logBox.focused ? '{bold}{magenta-bg}{white-fg} Logs * {/}' : '{bold}{magenta-fg} Logs {/}');
         metadataBox.setLabel(metadataBox.focused ? '{bold}{cyan-bg}{white-fg} Build Info * {/}' : '{bold}{cyan-fg} Build Info {/}');
     };
-    const setStatus = (msg) => {
+    const setStatus = (msg = '', { suppressShortcuts = false } = {}) => {
         updatePaneIndicators();
-        const paneHelp = singleJobMode ? '←/→ or 2/3 switch panes' : '←/→ or 1/2/3 switch panes';
-        const statusContent = `{bold}{green-fg}[${focusedPane()}]{/} ` + buildStatusLine(msg) + ` | ${paneHelp}`;
-        statusBar.setContent(statusContent);
+        const segments = [];
+        if (!suppressShortcuts) {
+            // Search/filters FIRST
+            const hints = shortcutHints();
+            segments.push(...hints);
+        }
+        // Status message second (if any)
+        if (msg)
+            segments.push(msg);
+        statusBar.setContent(segments.filter(Boolean).join(' | '));
         screen.render();
     };
     const refreshJobs = async () => {
@@ -473,7 +695,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
                 setStatus(`{green-fg}Job loaded{/}: {bold}${currentJob}{/}`);
                 return;
             }
-            setStatus('Loading jobs...');
+            setStatus('Loading jobs...', { suppressShortcuts: true });
             if (!singleJobMode) {
                 jobsBox.setItems(['{gray-fg}Loading jobs...{/}']);
                 jobsBox.select(0);
@@ -483,7 +705,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
             filteredJobs = [];
             // Optimization: If specific jobs are requested, fetch only those jobs
             if (jobsFilter && jobsFilter.length > 0) {
-                setStatus(`{yellow-fg}Loading specific jobs: ${jobsFilter.join(', ')}...{/}`);
+                setStatus(`{yellow-fg}Loading specific jobs: ${jobsFilter.join(', ')}...{/}`, { suppressShortcuts: true });
                 jobs = await client.getSpecificJobs(jobsFilter);
                 filteredJobs = jobs.slice();
                 if (!singleJobMode) {
@@ -538,7 +760,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
                     const pct = denom === 0 ? 0 : Math.round((stats.processed / denom) * 100);
                     if (now - lastRender > 200 && !singleJobMode) { // throttle to ~5fps
                         jobsBox.setItems(filteredJobs.map(j => `{white-fg}${j.fullName || j.name}{/}`));
-                        setStatus(`Loading jobs... ${stats.total} (${pct}%)`);
+                        setStatus(`Loading jobs... ${stats.total} (${pct}%)`, { suppressShortcuts: true });
                         lastRender = now;
                     }
                 } });
@@ -621,12 +843,26 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
             const fmtDur = () => {
                 const d = b.building ? (Date.now() - (b.timestamp || Date.now())) : durMs;
                 if (d < 1000)
-                    return d + 'ms';
+                    return `${Math.round(d)}ms`;
                 if (d < 60000)
-                    return Math.round(d / 1000) + 's';
-                if (d < 3600000)
-                    return Math.round(d / 60000) + 'm';
-                return Math.round(d / 3600000) + 'h';
+                    return `${Math.round(d / 1000)}s`;
+                if (d < 3600000) {
+                    const minutes = Math.floor(d / 60000);
+                    let seconds = Math.round((d % 60000) / 1000);
+                    let mins = minutes;
+                    if (seconds === 60) {
+                        mins += 1;
+                        seconds = 0;
+                    }
+                    return seconds > 0 ? `${mins}m ${seconds}s` : `${mins}m`;
+                }
+                let hours = Math.floor(d / 3600000);
+                let minutes = Math.round((d % 3600000) / 60000);
+                if (minutes === 60) {
+                    hours += 1;
+                    minutes = 0;
+                }
+                return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
             };
             const fmtAge = () => {
                 if (!b.timestamp)
@@ -653,7 +889,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
                 tagStart = '{cyan-fg}';
             else
                 tagStart = '{white-fg}';
-            const pad = (str, len) => (str.length >= len ? str.slice(0, len) : str + ' '.repeat(len - str.length));
+            const pad = (str, len) => padBlessed(str, len);
             let num = '#' + b.number;
             const dur = fmtDur();
             const age = fmtAge();
@@ -678,7 +914,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         if (!currentJob)
             return;
         try {
-            setStatus(`{yellow-fg}Loading builds for ${currentJob}...{/}`);
+            setStatus(`{yellow-fg}Loading builds for ${currentJob}...{/}`, { suppressShortcuts: true });
             buildsBox.setItems(['{gray-fg}Loading builds...{/}']);
             buildsBox.select(0);
             screen.render();
@@ -707,17 +943,51 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         // Update metadata box with build information
         if (currentBuild) {
             const status = currentBuild.building ? 'RUNNING' : (currentBuild.result || 'UNKNOWN');
+            const fmtMetaDuration = (ms) => {
+                if (!ms || ms < 0)
+                    return '0s';
+                if (ms < 60000)
+                    return `${Math.round(ms / 1000)}s`;
+                const minutes = Math.floor(ms / 60000);
+                const seconds = Math.round((ms % 60000) / 1000);
+                if (minutes >= 60) {
+                    const hours = Math.floor(minutes / 60);
+                    const remMinutes = minutes % 60;
+                    if (remMinutes === 0)
+                        return `${hours}h`;
+                    return seconds > 0 ? `${hours}h ${remMinutes}m ${seconds}s` : `${hours}h ${remMinutes}m`;
+                }
+                return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+            };
             const duration = currentBuild.building ?
-                `~${Math.round((Date.now() - (currentBuild.timestamp || Date.now())) / 1000)}s` :
-                `${Math.round((currentBuild.duration || 0) / 1000)}s`;
+                `~${fmtMetaDuration(Date.now() - (currentBuild.timestamp || Date.now()))}` :
+                fmtMetaDuration(currentBuild.duration || 0);
             const statusColor = currentBuild.building ? 'yellow' :
                 (currentBuild.result === 'SUCCESS' ? 'green' :
                     currentBuild.result === 'FAILURE' ? 'red' :
                         currentBuild.result === 'UNSTABLE' ? 'yellow' : 'cyan');
             const startTime = currentBuild.timestamp ? new Date(currentBuild.timestamp).toLocaleString() : 'Unknown';
             const description = stripHtml(currentBuild.description) || 'No description';
+            // Try to extract user from build data or actions
+            let startedBy = 'Unknown';
+            if (currentBuild.actions) {
+                const causeAction = currentBuild.actions.find(a => a._class?.includes('CauseAction') || a.causes);
+                if (causeAction?.causes) {
+                    const userCause = causeAction.causes.find(c => c.userId || c.userName);
+                    if (userCause) {
+                        startedBy = userCause.userName || userCause.userId || 'Unknown';
+                    }
+                    else if (causeAction.causes[0]?.shortDescription) {
+                        // Fallback to short description (e.g., "Started by user admin")
+                        const match = causeAction.causes[0].shortDescription.match(/Started by (?:user )?(.+)/i);
+                        if (match)
+                            startedBy = match[1];
+                    }
+                }
+            }
             metadataBox.setContent(`{bold}{white-fg}Build:{/} {bold}#${num}{/}  {bold}{white-fg}Status:{/} {${statusColor}-fg}${status}{/}  {bold}{white-fg}Duration:{/} {cyan-fg}${duration}{/}\n` +
-                `{bold}{white-fg}Started:{/} {gray-fg}${startTime}{/}  {bold}{white-fg}Description:{/} ${description}`);
+                `{bold}{white-fg}Started:{/} {gray-fg}${startTime}{/}  {bold}{white-fg}By:{/} {cyan-fg}${startedBy}{/}\n` +
+                `{bold}{white-fg}Description:{/} ${description}`);
         }
         else {
             metadataBox.setContent(`{gray-fg}Build #${num} - No metadata available{/}`);
@@ -748,41 +1018,22 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
                 screen.render();
             }
             else {
+                // Store original raw text for restoring after search
+                logRawText = text;
                 // Process and format the logs with enhanced features
                 const processed = processLogContent(text, num);
                 logLines = processed.lines;
-                // Check if processing resulted in empty content
                 if (!processed.formattedContent || processed.formattedContent.trim() === '') {
-                    // Fallback: show cleaned raw text if formatting failed
                     const cleanedText = cleanLogContent(text);
                     logBox.setContent(cleanedText || '{gray-fg}Build logs exist but could not be formatted properly.{/}');
                 }
                 else {
                     logBox.setContent(processed.formattedContent);
                 }
-                // Force proper scroll positioning and rendering
-                logBox.setScrollPerc(0); // Start at top
+                logBox.setScrollPerc(0);
                 screen.render();
-                // Small delay then scroll to bottom if there's content
-                setTimeout(() => {
-                    if (processed.formattedContent && processed.formattedContent.trim()) {
-                        logBox.setScrollPerc(100);
-                        screen.render();
-                    }
-                }, 50);
-                // Show log statistics
-                const stats = {
-                    total: logLines.length,
-                    errors: logLines.filter(l => l.level === 'ERROR' || l.level === 'FATAL').length,
-                    warnings: logLines.filter(l => l.level === 'WARN' || l.level === 'WARNING').length
-                };
-                let statusMsg = `{green-fg}Logs loaded{/} - ${stats.total} lines`;
-                if (stats.errors > 0)
-                    statusMsg += ` {red-fg}${stats.errors} errors{/}`;
-                if (stats.warnings > 0)
-                    statusMsg += ` {yellow-fg}${stats.warnings} warnings{/}`;
-                statusMsg += ' {gray-fg}| m:bookmark e:errors w:warnings{/}';
-                setStatus(statusMsg);
+                // Stats are now shown in footer automatically, just update status
+                setStatus();
             }
         }
         catch (e) {
@@ -821,7 +1072,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
             return;
         }
         artifactMode = true;
-        setStatus('Loading artifacts...');
+        setStatus('Loading artifacts...', { suppressShortcuts: true });
         try {
             const res = await client.getArtifacts(currentJob, b.number);
             artifacts = res.artifacts;
@@ -863,45 +1114,86 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
     // Log search functionality
     const searchInLogs = (content, query) => {
         if (!query)
-            return { highlightedContent: content, matches: [] };
+            return { highlightedContent: content, matches: [], filteredContent: content };
         const lines = content.split('\n');
         const matches = [];
         let matchIndex = 0;
-        const highlightedLines = lines.map((line, lineIndex) => {
+        const filteredLines = [];
+        lines.forEach((line, lineIndex) => {
             const lowerLine = line.toLowerCase();
             const lowerQuery = query.toLowerCase();
-            let highlightedLine = line;
+            // Check if this line matches
+            if (lowerLine.indexOf(lowerQuery) === -1) {
+                return; // Skip non-matching lines
+            }
+            // Find all match positions in the original line
+            const matchPositions = [];
             let searchIndex = 0;
             while (true) {
                 const index = lowerLine.indexOf(lowerQuery, searchIndex);
                 if (index === -1)
                     break;
+                matchPositions.push(index);
                 matches.push({ line: lineIndex, char: index, matchIndex: matchIndex++ });
-                // Replace the matched text with highlighted version
-                const before = highlightedLine.slice(0, index);
-                const match = highlightedLine.slice(index, index + query.length);
-                const after = highlightedLine.slice(index + query.length);
-                highlightedLine = before + `{black-bg}{yellow-fg}${match}{/}` + after;
-                searchIndex = index + query.length + '{black-bg}{yellow-fg}'.length + '{/}'.length;
+                searchIndex = index + query.length;
             }
-            return highlightedLine;
+            // Build highlighted line by inserting tags at correct positions
+            let highlightedLine = '';
+            let lastIndex = 0;
+            for (const pos of matchPositions) {
+                highlightedLine += line.slice(lastIndex, pos);
+                highlightedLine += `{black-bg}{yellow-fg}${line.slice(pos, pos + query.length)}{/}`;
+                lastIndex = pos + query.length;
+            }
+            highlightedLine += line.slice(lastIndex);
+            filteredLines.push(highlightedLine);
         });
-        return { highlightedContent: highlightedLines.join('\n'), matches };
+        return {
+            highlightedContent: lines.join('\n'),
+            filteredContent: filteredLines.join('\n'),
+            matches
+        };
     };
     const updateLogSearchDisplay = () => {
-        if (!logSearchQuery)
+        // Search in the raw log lines, not the formatted content
+        if (!logLines || logLines.length === 0) {
+            if (logSearchMode) {
+                // Show search input at top even with no logs
+                logBox.setContent(`{cyan-bg}{black-fg} Search: {/}{white-bg}{black-fg}${logSearchQuery}█{/}\n\n{yellow-fg}No logs to search{/}`);
+                screen.render();
+            }
+            setStatus(`{yellow-fg}No logs to search{/}`);
             return;
-        const rawContent = logBox.getContent();
-        // Remove existing highlighting for clean search
-        const cleanContent = rawContent.replace(/\{[^}]*\}/g, '');
-        const { highlightedContent, matches } = searchInLogs(cleanContent, logSearchQuery);
+        }
+        // Get clean text from raw lines for searching
+        // Note: logLines are already in display order (reversed or not), so use them directly
+        const rawText = logLines.map(l => l.raw).join('\n');
+        // If no query, don't change display
+        if (!logSearchQuery || logSearchQuery.trim() === '') {
+            logSearchMatches = [];
+            setStatus();
+            screen.render();
+            return;
+        }
+        const { filteredContent, matches } = searchInLogs(rawText, logSearchQuery);
         logSearchMatches = matches;
         if (matches.length > 0) {
-            logBox.setContent(highlightedContent);
-            setStatus(`{green-fg}Found ${matches.length} matches{/} - n/N to navigate`);
+            // Format the filtered content - show in white with only matches highlighted
+            const lines = filteredContent.split('\n');
+            const formattedLines = lines.map((line, index) => {
+                const lineNum = String(index + 1).padStart(4, ' ');
+                // Line is already highlighted from searchInLogs, just add line number and white color
+                return `{gray-fg}${lineNum}{/}  {white-fg}${line}{/}`;
+            });
+            logBox.setContent(formattedLines.join('\n'));
+            logBox.setScrollPerc(0); // Reset scroll to top
+            setStatus();
         }
-        else {
-            setStatus(`{yellow-fg}No matches found for "${logSearchQuery}"{/}`);
+        else if (logSearchQuery) {
+            // Show "no matches" message
+            logBox.setContent('{gray-fg}No lines match your search query.{/}');
+            logBox.setScrollPerc(0); // Reset scroll to top
+            setStatus();
         }
         screen.render();
     };
@@ -938,8 +1230,9 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
                     hasReceivedData = true;
                 }
                 const cleanedChunk = cleanLogContent(chunk);
-                logBox.setContent(logBox.getContent() + formatLogsChunk(cleanedChunk));
-                logBox.setScrollPerc(100);
+                // In follow mode, prepend new content since logs are reversed
+                logBox.setContent(formatLogsChunk(cleanedChunk) + logBox.getContent());
+                logBox.setScrollPerc(0); // Stay at top for reversed logs
                 screen.render();
             }, 2000, { signal: abortController.signal });
             setStatus(`{green-fg}Build #${num} complete{/}. f toggle follow, r refresh`);
@@ -961,7 +1254,10 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
             }
         }
     };
+    jobsBox.on('blur', deactivateClassicTyping);
+    buildsBox.on('blur', deactivateClassicTyping);
     jobsBox.on('select', async (_item, idx) => {
+        deactivateClassicTyping();
         const selectedJob = filteredJobs[idx];
         if (!selectedJob)
             return;
@@ -977,7 +1273,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
             return;
         }
         // Show immediate loading feedback for valid jobs
-        setStatus(`{yellow-fg}Loading ${currentJob}...{/}`);
+        setStatus(`{yellow-fg}Loading ${currentJob}...{/}`, { suppressShortcuts: true });
         buildsBox.setItems(['{gray-fg}Loading...{/}']);
         logBox.setContent(`{yellow-fg}📋 Loading job: ${currentJob}{/}\n\n{gray-fg}Fetching recent builds and build information...{/}`);
         logBox.setScrollPerc(0);
@@ -998,11 +1294,12 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         }
     });
     buildsBox.on('select', async (_item, idx) => {
+        deactivateClassicTyping();
         const b = filteredBuilds[idx];
         if (!b)
             return;
         // Show immediate loading feedback for build selection
-        setStatus(`{yellow-fg}Loading build #${b.number}...{/}`);
+        setStatus(`{yellow-fg}Loading build #${b.number}...{/}`, { suppressShortcuts: true });
         if (follow) {
             startFollow(b.number);
         }
@@ -1011,7 +1308,7 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         }
     });
     const applyJobFilter = () => {
-        const query = searchQuery || incrementalQuery;
+        const query = searchQuery;
         let jobsWithScores = [];
         if (!query) {
             jobsWithScores = jobs.map(j => ({ job: j, score: 1, matches: [] }));
@@ -1043,14 +1340,179 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         currentJob = filteredJobs[0]?.name || null;
         screen.render();
     };
-    screen.key(['q', 'C-c'], () => { if (abortController)
-        abortController.abort(); process.exit(0); });
-    screen.key('r', async () => { if (searchMode)
+    const startJobSearch = () => {
+        if (singleJobMode || (helpBox || artifactBox))
+            return;
+        searchMode = true;
+        buildFilterMode = false;
+        buildSearchMode = false;
+        logSearchMode = false;
+        searchQuery = '';
+        inputMode = 'job-search';
+        setStatus();
+    };
+    const startBuildFilter = () => {
+        searchMode = false;
+        buildFilterMode = true;
+        buildSearchMode = false;
+        logSearchMode = false;
+        buildTextFilter = '';
+        inputMode = 'build-filter';
+        setStatus();
+    };
+    const startBuildSearch = () => {
+        searchMode = false;
+        buildFilterMode = false;
+        buildSearchMode = true;
+        logSearchMode = false;
+        buildSearchQuery = '';
+        inputMode = 'build-search';
+        setStatus();
+    };
+    const startLogSearch = () => {
+        searchMode = false;
+        buildFilterMode = false;
+        buildSearchMode = false;
+        logSearchMode = true;
+        logSearchQuery = '';
+        logSearchMatches = [];
+        logSearchIndex = -1;
+        inputMode = 'log-search';
+        setStatus();
+        // Don't call updateLogSearchDisplay() here - just update status bar
+    };
+    const isTyping = () => inputMode !== 'none' && inputMode !== 'classic';
+    const trackClassicTyping = (ch) => {
+        if (searchMode || buildFilterMode || buildSearchMode || logSearchMode)
+            return;
+        if (!ch || ch.length !== 1)
+            return;
+        if (!/^[ -~]$/.test(ch))
+            return;
+        activateClassicTyping();
+    };
+    jobsBox.on('keypress', (ch) => {
+        trackClassicTyping(ch);
+    });
+    buildsBox.on('keypress', (ch) => {
+        trackClassicTyping(ch);
+    });
+    screen.on('keypress', (ch, key) => {
+        const printable = ch && /^[ -~]$/.test(ch);
+        const classicContext = isClassicTypingContext() && !searchMode && !buildFilterMode && !buildSearchMode && !logSearchMode;
+        if (classicContext && printable) {
+            activateClassicTyping();
+        }
+        else if (!classicContext && classicTypingMode) {
+            deactivateClassicTyping();
+        }
+        if (searchMode) {
+            if (key?.name === 'backspace') {
+                searchQuery = searchQuery.slice(0, -1);
+                setStatus();
+                applyJobFilter();
+                return;
+            }
+            if (key?.full === 'enter') {
+                searchMode = false;
+                setStatus();
+                inputMode = 'none';
+                return;
+            }
+            if (printable && /^[\w._:-]$/.test(ch)) {
+                searchQuery += ch;
+                setStatus();
+                applyJobFilter();
+            }
+        }
+        else if (buildFilterMode) {
+            if (key?.name === 'backspace') {
+                buildTextFilter = buildTextFilter.slice(0, -1);
+                setStatus();
+                applyBuildFilters();
+                return;
+            }
+            if (key?.full === 'enter') {
+                buildFilterMode = false;
+                setStatus();
+                inputMode = 'none';
+                return;
+            }
+            if (key?.name === 'escape') {
+                buildFilterMode = false;
+                buildTextFilter = '';
+                applyBuildFilters();
+                setStatus();
+                inputMode = 'none';
+                return;
+            }
+            if (printable && /^[\w._:-]$/.test(ch)) {
+                buildTextFilter += ch;
+                setStatus();
+                applyBuildFilters();
+            }
+        }
+        else if (buildSearchMode) {
+            if (key?.name === 'backspace') {
+                buildSearchQuery = buildSearchQuery.slice(0, -1);
+                setStatus();
+                applyBuildFilters();
+                return;
+            }
+            if (key?.full === 'enter') {
+                buildSearchMode = false;
+                setStatus();
+                inputMode = 'none';
+                return;
+            }
+            if (printable && /^[\w._:-\s]$/.test(ch)) {
+                buildSearchQuery += ch;
+                setStatus();
+                applyBuildFilters();
+            }
+        }
+        else if (logSearchMode) {
+            if (key?.name === 'backspace') {
+                logSearchQuery = logSearchQuery.slice(0, -1);
+                setStatus();
+                updateLogSearchDisplay();
+                return;
+            }
+            if (key?.full === 'enter') {
+                logSearchMode = false;
+                updateLogSearchDisplay();
+                logSearchIndex = 0;
+                setStatus();
+                inputMode = 'none';
+                return;
+            }
+            if (printable && /^[\w._:-\s]$/.test(ch)) {
+                logSearchQuery += ch;
+                setStatus();
+                updateLogSearchDisplay();
+            }
+        }
+        // Else: let panes handle native navigation/search.
+    });
+    screen.key('q', () => {
+        if (isTyping())
+            return;
+        if (abortController)
+            abortController.abort();
+        process.exit(0);
+    });
+    screen.key('C-c', () => {
+        if (abortController)
+            abortController.abort();
+        process.exit(0);
+    });
+    screen.key('r', async () => { if (isTyping())
         return; await refreshJobs(); await refreshBuilds(); });
-    screen.key('f', () => { follow = !follow; setStatus((follow ? 'Follow ON' : 'Follow OFF')); });
+    screen.key('f', () => { if (isTyping())
+        return; follow = !follow; setStatus((follow ? 'Follow ON' : 'Follow OFF')); });
     // Open current job or build in web browser
     screen.key('w', async () => {
-        if (searchMode || buildFilterMode || helpBox || artifactBox)
+        if (isTyping() || helpBox || artifactBox)
             return;
         try {
             const base = client.baseUrl.replace(/\/$/, '');
@@ -1081,18 +1543,20 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
             setStatus('Error opening browser: ' + e.message);
         }
     });
-    screen.key('S', () => { sortAsc = !sortAsc; applyBuildFilters(); setStatus(`Sort: ${sortAsc ? 'ASC' : 'DESC'}`); });
-    screen.key('t', () => { autoRefresh = !autoRefresh; if (autoRefresh)
+    screen.key('S', () => { if (isTyping())
+        return; sortAsc = !sortAsc; applyBuildFilters(); setStatus(`Sort: ${sortAsc ? 'ASC' : 'DESC'}`); });
+    screen.key('t', () => { if (isTyping())
+        return; autoRefresh = !autoRefresh; if (autoRefresh)
         startAutoRefresh();
     else if (autoRefreshTimer) {
         clearInterval(autoRefreshTimer);
         autoRefreshTimer = null;
     } setStatus(`AutoRefresh: ${autoRefresh ? (autoRefreshInterval / 1000) + 's' : 'OFF'}`); });
-    screen.key('a', async () => { if (searchMode || buildFilterMode)
+    screen.key('a', async () => { if (isTyping())
         return; await showArtifacts(); });
     // Change job limit
     screen.key('L', () => {
-        if (helpBox || artifactBox)
+        if (isTyping() || helpBox || artifactBox)
             return;
         let promptBox = blessed.box({ parent: screen, top: 'center', left: 'center', width: '40%', height: 5, border: 'line', label: ' Job Limit ', tags: true, content: 'Enter job limit (0 = unlimited):' });
         const input = blessed.textbox({ parent: promptBox, top: 2, left: 1, width: '90%', height: 1, inputOnFocus: true, keys: true, mouse: true, border: 'line' });
@@ -1112,56 +1576,83 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         input.focus();
         screen.render();
     });
-    screen.key('/', () => {
-        searchMode = true;
-        searchQuery = '';
-        incrementalQuery = '';
-        setStatus('Search: (type, ESC to cancel)');
-    });
+    // Removed legacy duplicate '/' binding; unified later context-aware binding
     // Result filter cycle
     screen.key('F', () => {
+        if (isTyping())
+            return;
         resultFilterIdx = (resultFilterIdx + 1) % resultFilterStates.length;
         applyBuildFilters();
         setStatus(`Result filter: ${resultFilterStates[resultFilterIdx]} (${filteredBuilds.length}/${builds.length})`);
     });
     // Folders only toggle
     screen.key('o', () => {
+        if (isTyping())
+            return;
         foldersOnly = !foldersOnly;
         applyJobFilter();
         setStatus(`Folders filter: ${foldersOnly ? 'ON' : 'OFF'}`);
     });
     // Build search modes
-    let buildFilterMode = false;
     screen.key('b', () => {
-        if (searchMode || logSearchMode)
+        if (helpBox || artifactBox)
             return;
-        buildFilterMode = true;
-        buildTextFilter = '';
-        setStatus('Build filter: (type, Enter apply, ESC cancel)');
+        if (inputMode === 'classic')
+            deactivateClassicTyping();
+        if (isTyping())
+            return;
+        if (!buildsBox.focused) {
+            setStatus('{gray-fg}Focus the Builds panel to search builds{/}', { suppressShortcuts: true });
+            return;
+        }
+        startBuildFilter();
     });
     // Enhanced build search (uppercase B for fuzzy search)
     screen.key('B', () => {
-        if (searchMode || buildFilterMode || logSearchMode)
+        if (helpBox || artifactBox)
             return;
-        buildSearchMode = true;
-        buildSearchQuery = '';
-        setStatus('{cyan-fg}Build search:{/} (type to search, Enter apply, ESC cancel)');
+        if (inputMode === 'classic')
+            deactivateClassicTyping();
+        if (isTyping())
+            return;
+        if (!buildsBox.focused) {
+            setStatus('{gray-fg}Focus the Builds panel to search builds{/}', { suppressShortcuts: true });
+            return;
+        }
+        startBuildSearch();
     });
     // Log search
     screen.key('/', () => {
-        if (searchMode || buildFilterMode || buildSearchMode)
+        if (inputMode === 'classic')
+            deactivateClassicTyping();
+        if (isTyping())
             return;
         if (logBox.focused) {
-            logSearchMode = true;
-            logSearchQuery = '';
-            setStatus('{magenta-fg}Log search:{/} (type to search, Enter apply, ESC cancel)');
+            startLogSearch();
         }
         else {
-            // Original job search behavior
-            searchMode = true;
-            searchQuery = '';
-            incrementalQuery = '';
-            setStatus('Job search: (type, ESC to cancel)');
+            setStatus('{gray-fg}Log search is available from the Logs panel{/}', { suppressShortcuts: true });
+        }
+    });
+    // Contextual search (explicit via 's')
+    screen.key('s', () => {
+        if (helpBox || artifactBox)
+            return;
+        if (inputMode === 'classic')
+            deactivateClassicTyping();
+        if (isTyping())
+            return;
+        if (!singleJobMode && jobsBox.focused) {
+            startJobSearch();
+        }
+        else if (buildsBox.focused) {
+            startBuildFilter();
+        }
+        else if (logBox.focused) {
+            startLogSearch();
+        }
+        else {
+            setStatus('{gray-fg}Search is available in Jobs, Builds, or Logs panels{/}', { suppressShortcuts: true });
         }
     });
     // Navigate search results in logs
@@ -1181,28 +1672,38 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
     });
     // Enhanced log navigation keys
     screen.key('m', () => {
+        if (isTyping())
+            return;
         if (logBox.focused && logLines.length > 0) {
             toggleBookmark();
         }
     });
     // Jump to log levels
     screen.key('e', () => {
+        if (isTyping())
+            return;
         if (logBox.focused) {
             jumpToLogLevel('ERROR');
         }
     });
     screen.key('W', () => {
+        if (isTyping())
+            return;
         if (logBox.focused) {
             jumpToLogLevel('WARN');
         }
     });
     screen.key('i', () => {
+        if (isTyping())
+            return;
         if (logBox.focused) {
             jumpToLogLevel('INFO');
         }
     });
     // Toggle line numbers
     screen.key('l', () => {
+        if (isTyping())
+            return;
         if (logBox.focused && logCurrentBuild) {
             showLineNumbers = !showLineNumbers;
             const processed = processLogContent(logBox.getContent(), logCurrentBuild);
@@ -1211,8 +1712,60 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
             screen.render();
         }
     });
+    // Toggle log sort order
+    screen.key('R', () => {
+        if (isTyping())
+            return;
+        if (logBox.focused && logCurrentBuild && logLines.length > 0) {
+            logReversed = !logReversed;
+            // Re-process logs with new sort order
+            const rawText = logLines.map(l => l.raw).join('\n');
+            const processed = processLogContent(rawText, logCurrentBuild);
+            logLines = processed.lines;
+            logBox.setContent(processed.formattedContent);
+            logBox.setScrollPerc(0); // Go to top after reordering
+            setStatus(`{green-fg}Log order: ${logReversed ? 'Newest first' : 'Oldest first'}{/}`);
+            screen.render();
+        }
+    });
+    // Toggle fullscreen logs
+    screen.key('z', () => {
+        if (isTyping())
+            return;
+        if (logBox.focused || logFullscreen) {
+            logFullscreen = !logFullscreen;
+            if (logFullscreen) {
+                // Hide other panels and expand log box to fullscreen
+                if (!singleJobMode)
+                    jobsBox.hide();
+                buildsBox.hide();
+                metadataBox.hide();
+                logBox.top = 0;
+                logBox.left = 0;
+                logBox.width = '100%';
+                logBox.height = '100%-3';
+                logBox.setLabel('{bold}{magenta-bg}{white-fg} Logs (Fullscreen - press z to exit) {/}');
+            }
+            else {
+                // Restore normal layout
+                if (!singleJobMode)
+                    jobsBox.show();
+                buildsBox.show();
+                metadataBox.show();
+                logBox.top = 6;
+                logBox.left = singleJobMode ? '30%' : '40%';
+                logBox.width = singleJobMode ? '70%' : '60%';
+                logBox.height = '100%-9';
+                logBox.setLabel(logBox.focused ? '{bold}{magenta-bg}{white-fg} Logs * {/}' : '{bold}{magenta-fg} Logs {/}');
+            }
+            screen.render();
+            setStatus(`{green-fg}Fullscreen: ${logFullscreen ? 'ON' : 'OFF'}{/}`);
+        }
+    });
     // Toggle wrap mode (note: blessed doesn't support dynamic wrap changes, so we show info instead)
     screen.key('w', () => {
+        if (isTyping())
+            return;
         if (logBox.focused) {
             logWrapMode = !logWrapMode;
             setStatus(`{yellow-fg}Word wrap toggle noted (${logWrapMode ? 'ON' : 'OFF'}) - refresh logs to apply{/}`);
@@ -1225,21 +1778,27 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
     });
     // Jump to top/bottom
     screen.key('g', () => {
+        if (isTyping())
+            return;
         if (logBox.focused) {
             logBox.setScrollPerc(0);
-            setStatus('{green-fg}Jumped to top{/}');
+            setStatus(`{green-fg}Jumped to ${logReversed ? 'newest' : 'oldest'}{/}`);
             screen.render();
         }
     });
     screen.key('G', () => {
+        if (isTyping())
+            return;
         if (logBox.focused) {
             logBox.setScrollPerc(100);
-            setStatus('{green-fg}Jumped to bottom{/}');
+            setStatus(`{green-fg}Jumped to ${logReversed ? 'oldest' : 'newest'}{/}`);
             screen.render();
         }
     });
     // Navigate bookmarks
     screen.key('M', () => {
+        if (isTyping())
+            return;
         if (logBox.focused && logBookmarks.length > 0) {
             // Just jump to the first bookmark for now
             const nextBookmark = logBookmarks[0];
@@ -1252,6 +1811,8 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
     });
     // Pane navigation shortcuts (adjusted for single-job mode)
     screen.key(['left'], () => {
+        if (isTyping())
+            return;
         if (artifactBox || helpBox)
             return; // don't steal focus
         if (singleJobMode) {
@@ -1270,9 +1831,12 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
                 showPaneFeedback('jobs');
             }
         }
+        setStatus();
         screen.render();
     });
     screen.key(['right'], () => {
+        if (isTyping())
+            return;
         if (artifactBox || helpBox)
             return;
         if (singleJobMode) {
@@ -1291,40 +1855,52 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
                 showPaneFeedback('logs');
             }
         }
+        setStatus();
         screen.render();
     });
-    screen.key('1', () => { if (!artifactBox && !helpBox && !singleJobMode) {
+    screen.key('1', () => { if (isTyping())
+        return; if (!artifactBox && !helpBox && !singleJobMode) {
         jobsBox.focus();
         showPaneFeedback('jobs');
+        setStatus();
         screen.render();
     } });
-    screen.key('2', () => { if (!artifactBox && !helpBox) {
+    screen.key('2', () => { if (isTyping())
+        return; if (!artifactBox && !helpBox) {
         buildsBox.focus();
         showPaneFeedback('builds');
+        setStatus();
         screen.render();
     } });
-    screen.key('3', () => { if (!artifactBox && !helpBox) {
+    screen.key('3', () => { if (isTyping())
+        return; if (!artifactBox && !helpBox) {
         logBox.focus();
         showPaneFeedback('logs');
+        setStatus();
         screen.render();
     } });
     screen.key('c', () => {
+        if (isTyping())
+            return;
         buildTextFilter = '';
         buildSearchQuery = '';
         logSearchQuery = '';
         resultFilterIdx = 0;
         applyBuildFilters();
         setStatus('All filters cleared');
+        inputMode = 'none';
     });
     // Help popup
     screen.key('?', () => {
+        if (isTyping())
+            return;
         if (helpBox) {
             helpBox.destroy();
             helpBox = null;
             screen.render();
             return;
         }
-        helpBox = blessed.box({ parent: screen, width: '90%', height: '80%', top: 'center', left: 'center', border: 'line', label: ' Help ', scrollable: true, keys: true, mouse: true, tags: true, content: `{bold}Navigation & Actions{/bold}:\n{bold}q{/bold} quit   {bold}r{/bold} refresh   {bold}f{/bold} follow toggle   {bold}w{/bold} open in browser (or wrap in logs)   {bold}a{/bold} artifacts\n{bold}←/→{/bold} pane focus   {bold}1{/bold}/{bold}2{/bold}/{bold}3{/bold} jump to Jobs/Builds/Logs\n{bold}S{/bold} toggle sort asc/desc   {bold}t{/bold} toggle auto-refresh   {bold}o{/bold} folders-only\n\n{bold}Search & Filtering{/bold}:\nType letters: live filter jobs (ESC clear)\n{bold}/{/bold} explicit job search OR log search (when logs focused)\n{bold}b{/bold} build text filter   {bold}B{/bold} build fuzzy search\n{bold}F{/bold} cycle result filter (ALL/RUNNING/FAILED/SUCCESS)\n{bold}c{/bold} clear all filters   {bold}L{/bold} set job limit\n\n{bold}Log Search & Navigation{/bold}:\n{bold}n{/bold} next match   {bold}N{/bold} previous match   {bold}/{/bold} search in logs\n{bold}g{/bold} jump to top   {bold}G{/bold} jump to bottom\n{bold}e{/bold} jump to errors   {bold}W{/bold} jump to warnings   {bold}i{/bold} jump to info\n\n{bold}Log Bookmarks & Display{/bold}:\n{bold}m{/bold} toggle bookmark   {bold}M{/bold} next bookmark\n{bold}l{/bold} toggle line numbers   {bold}w{/bold} toggle word wrap\n\n{bold}Enhanced Log Features{/bold}:\n• Line numbers with bookmarks (📌)\n• Syntax highlighting with emojis\n• Log level statistics and navigation\n• Visual scrollbar\n• Timestamp extraction\n• Performance optimized rendering\n\n{bold}Legend{/bold}: {yellow-fg}RUNNING{/} {green-fg}SUCCESS{/} {red-fg}FAILURE{/} {magenta-fg}UNSTABLE{/} {cyan-fg}ABORTED{/}` });
+        helpBox = blessed.box({ parent: screen, width: '90%', height: '80%', top: 'center', left: 'center', border: 'line', label: ' Help ', scrollable: true, keys: true, mouse: true, tags: true, content: `{bold}Navigation & Actions{/bold}:\n{bold}q{/bold} quit   {bold}r{/bold} refresh   {bold}f{/bold} follow toggle   {bold}w{/bold} open in browser (or wrap in logs)   {bold}a{/bold} artifacts\n{bold}←/→{/bold} pane focus   {bold}1{/bold}/{bold}2{/bold}/{bold}3{/bold} jump to Jobs/Builds/Logs\n{bold}S{/bold} toggle sort asc/desc   {bold}t{/bold} toggle auto-refresh   {bold}o{/bold} folders-only\n\n{bold}Search & Filtering{/bold}:\n{bold}s{/bold} search (context-aware: jobs/builds/logs)\n{bold}b{/bold} build text filter   {bold}B{/bold} build fuzzy search\n{bold}F{/bold} cycle result filter (ALL/RUNNING/FAILED/SUCCESS)\n{bold}c{/bold} clear all filters   {bold}L{/bold} set job limit\n\n{bold}Log Search & Navigation{/bold}:\n{bold}n{/bold} next match   {bold}N{/bold} previous match   {bold}s{/bold} search in logs\n{bold}g{/bold} jump to top   {bold}G{/bold} jump to bottom\n{bold}e{/bold} jump to errors   {bold}W{/bold} jump to warnings   {bold}i{/bold} jump to info\n\n{bold}Log Bookmarks & Display{/bold}:\n{bold}m{/bold} toggle bookmark   {bold}M{/bold} next bookmark\n{bold}l{/bold} toggle line numbers   {bold}R{/bold} reverse log order (newest/oldest first)\n{bold}z{/bold} toggle fullscreen logs\n\n{bold}Enhanced Log Features{/bold}:\n• Logs show newest first by default (toggle with R)\n• Fullscreen mode (z) for focused log viewing\n• Line numbers with bookmarks (📌)\n• Syntax highlighting with emojis\n• Log level statistics and navigation\n• Visual scrollbar\n• Timestamp extraction\n• Performance optimized rendering\n\n{bold}Legend{/bold}: {yellow-fg}RUNNING{/} {green-fg}SUCCESS{/} {red-fg}FAILURE{/} {magenta-fg}UNSTABLE{/} {cyan-fg}ABORTED{/}` });
         helpBox.key(['q', 'escape', '?'], () => { if (helpBox) {
             helpBox.destroy();
             helpBox = null;
@@ -1333,136 +1909,50 @@ export async function runInteractive(client, { jobSearchLimit = 0, buildsLimit =
         screen.render();
     });
     screen.key('escape', () => {
+        if (isClassicTypingActive()) {
+            deactivateClassicTyping();
+        }
         if (searchMode) {
             searchMode = false;
             searchQuery = '';
-            incrementalQuery = '';
             applyJobFilter();
-            setStatus('Job search cancelled');
+            setStatus();
+            inputMode = 'none';
         }
         else if (buildFilterMode) {
             buildFilterMode = false;
             buildTextFilter = '';
             applyBuildFilters();
-            setStatus('Build filter cancelled');
+            setStatus();
+            inputMode = 'none';
         }
         else if (buildSearchMode) {
             buildSearchMode = false;
             buildSearchQuery = '';
             applyBuildFilters();
-            setStatus('Build search cancelled');
+            setStatus();
+            inputMode = 'none';
         }
-        else if (logSearchMode) {
+        else if (logSearchMode || logSearchQuery) {
+            // Clear search and restore original logs
             logSearchMode = false;
             logSearchQuery = '';
             logSearchMatches = [];
             logSearchIndex = -1;
-            setStatus('Log search cancelled');
+            inputMode = 'none';
+            // Restore original log content without search
+            if (logRawText && logCurrentBuild) {
+                const processed = processLogContent(logRawText, logCurrentBuild);
+                logLines = processed.lines;
+                logBox.setContent(processed.formattedContent);
+                logBox.setScrollPerc(0);
+                screen.render();
+            }
+            setStatus();
         }
         else {
-            incrementalQuery = '';
-            setStatus('Cleared incremental search');
-        }
-    });
-    screen.on('keypress', (ch, key) => {
-        if (searchMode) {
-            if (key.name === 'backspace') {
-                searchQuery = searchQuery.slice(0, -1);
-                setStatus('Job search: ' + searchQuery);
-                applyJobFilter();
-                return;
-            }
-            if (key.full === 'enter') {
-                searchMode = false;
-                setStatus('Job search applied');
-                return;
-            }
-            if (ch && /^[\w._:-]$/.test(ch)) {
-                searchQuery += ch;
-                setStatus('Job search: ' + searchQuery);
-                applyJobFilter();
-            }
-        }
-        else if (buildFilterMode) {
-            if (key.name === 'backspace') {
-                buildTextFilter = buildTextFilter.slice(0, -1);
-                setStatus('Build filter: ' + buildTextFilter);
-                applyBuildFilters();
-                return;
-            }
-            if (key.full === 'enter') {
-                buildFilterMode = false;
-                setStatus('Build filter applied');
-                return;
-            }
-            if (key.name === 'escape') {
-                buildFilterMode = false;
-                buildTextFilter = '';
-                applyBuildFilters();
-                setStatus('Build filter cancelled');
-                return;
-            }
-            if (ch && /^[\w._:-]$/.test(ch)) {
-                buildTextFilter += ch;
-                setStatus('Build filter: ' + buildTextFilter);
-                applyBuildFilters();
-            }
-        }
-        else if (buildSearchMode) {
-            if (key.name === 'backspace') {
-                buildSearchQuery = buildSearchQuery.slice(0, -1);
-                setStatus('Build search: ' + buildSearchQuery);
-                applyBuildFilters();
-                return;
-            }
-            if (key.full === 'enter') {
-                buildSearchMode = false;
-                setStatus('Build search applied');
-                return;
-            }
-            if (ch && /^[\w._:-\s]$/.test(ch)) {
-                buildSearchQuery += ch;
-                setStatus('Build search: ' + buildSearchQuery);
-                applyBuildFilters();
-            }
-        }
-        else if (logSearchMode) {
-            if (key.name === 'backspace') {
-                logSearchQuery = logSearchQuery.slice(0, -1);
-                setStatus('Log search: ' + logSearchQuery);
-                updateLogSearchDisplay();
-                return;
-            }
-            if (key.full === 'enter') {
-                logSearchMode = false;
-                updateLogSearchDisplay();
-                logSearchIndex = 0;
-                setStatus(`Log search applied - ${logSearchMatches.length} matches`);
-                return;
-            }
-            if (ch && /^[\w._:-\s]$/.test(ch)) {
-                logSearchQuery += ch;
-                setStatus('Log search: ' + logSearchQuery);
-                updateLogSearchDisplay();
-            }
-        }
-        else {
-            // Incremental job search without slash
-            if (key.name === 'backspace') {
-                if (incrementalQuery) {
-                    incrementalQuery = incrementalQuery.slice(0, -1);
-                    searchQuery = incrementalQuery;
-                    applyJobFilter();
-                    setStatus('Search: ' + incrementalQuery);
-                }
-                return;
-            }
-            if (ch && /^[\w._:-]$/.test(ch)) {
-                incrementalQuery += ch;
-                searchQuery = incrementalQuery;
-                applyJobFilter();
-                setStatus('Search: ' + incrementalQuery + ' (ESC clear)');
-            }
+            inputMode = 'none';
+            setStatus();
         }
     });
     // Initialize with helpful empty states

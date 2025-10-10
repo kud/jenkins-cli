@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JenkinsClient } from '../src/jenkins-client.js';
+import { resolveFromDist } from './helpers/ts-imports.js';
+const { JenkinsClient } = await import(resolveFromDist('src/jenkins-client.js'));
 // Controlled mock fetch for multiple behaviors
 const calls = [];
 let scenario = '';

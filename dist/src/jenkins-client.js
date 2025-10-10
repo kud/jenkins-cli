@@ -113,7 +113,8 @@ export class JenkinsClient {
                 throw new Error('No lastBuild found');
             buildNumber = number;
         }
-        return this._request(`job/${encodeURIComponent(job)}/${buildNumber}/api/json`);
+        // Request actions to get user/cause information
+        return this._request(`job/${encodeURIComponent(job)}/${buildNumber}/api/json?tree=*,actions[*,causes[*]]`);
     }
     async getConsoleText(job, buildNumber) {
         if (!buildNumber) {

@@ -139,71 +139,73 @@ const detectAndHighlightCode = (line) => {
 import { sanitizeLogChunk } from './log-sanitizer.js';
 
 export function formatLogsChunk(chunk) {
-  const sanitized = sanitizeLogChunk(chunk, { stripAnsi: true });
+  const sanitized = sanitizeLogChunk(chunk, { stripAnsi: false });
   let text = sanitized;
   if (DISABLE_UNICODE_ICONS) {
     text = text.replace(emojiRegex, m => ICON_FALLBACK[m] || '');
   }
   // Enhanced colouring & comprehensive syntax highlighting with highlight.js
-  return text.split(/\n/).map(line => {
-    if (!line) return line;
+  return text.split(/\n/).map(rawLine => {
+    if (!rawLine) return rawLine;
     
     // Jenkins-specific build status messages (highest priority)
-    if (/BUILD (SUCCESS|SUCCESSFUL)/i.test(line)) return chalk.bold.green('✅ ' + line);
-    if (/BUILD (FAIL|FAILURE|FAILED)/i.test(line)) return chalk.bold.red('❌ ' + line);
-    if (/UNSTABLE/i.test(line)) return chalk.bold.yellow('⚠️  ' + line);
-    if (/ABORTED/i.test(line)) return chalk.bold.gray('✂️  ' + line);
+    const plainLine = sanitizeLogChunk(rawLine, { stripAnsi: true });
+    if (/BUILD (SUCCESS|SUCCESSFUL)/i.test(plainLine)) return chalk.bold.green('✅ ' + plainLine);
+    if (/BUILD (FAIL|FAILURE|FAILED)/i.test(plainLine)) return chalk.bold.red('❌ ' + plainLine);
+    if (/UNSTABLE/i.test(plainLine)) return chalk.bold.yellow('⚠️  ' + plainLine);
+    if (/ABORTED/i.test(plainLine)) return chalk.bold.gray('✂️  ' + plainLine);
     
     // Maven/Gradle build phases
-    if (/\[INFO\].*--- .* ---/.test(line)) return chalk.bold.cyan(line);
-    if (/\[INFO\] BUILD SUCCESS/.test(line)) return chalk.bold.green('🎉 ' + line);
-    if (/\[ERROR\] BUILD FAILURE/.test(line)) return chalk.bold.red('💥 ' + line);
+    if (/\[INFO\].*--- .* ---/.test(plainLine)) return chalk.bold.cyan(plainLine);
+    if (/\[INFO\] BUILD SUCCESS/.test(plainLine)) return chalk.bold.green('🎉 ' + plainLine);
+    if (/\[ERROR\] BUILD FAILURE/.test(plainLine)) return chalk.bold.red('💥 ' + plainLine);
     
     // Test results with enhanced formatting
-    if (/Tests run:.*Failures:.*Errors:/.test(line)) {
-      return line.replace(/Tests run: (\d+)/, (_m, n) => `Tests run: ${chalk.cyan.bold(n)}`)
+    if (/Tests run:.*Failures:.*Errors:/.test(plainLine)) {
+      return plainLine.replace(/Tests run: (\d+)/, (_m, n) => `Tests run: ${chalk.cyan.bold(n)}`)
                  .replace(/Failures: (\d+)/, (_m, n) => n === '0' ? `Failures: ${chalk.green.bold(n)}` : `Failures: ${chalk.red.bold(n)}`)
                  .replace(/Errors: (\d+)/, (_m, n) => n === '0' ? `Errors: ${chalk.green.bold(n)}` : `Errors: ${chalk.red.bold(n)}`)
                  .replace(/Skipped: (\d+)/, (_m, n) => n === '0' ? `Skipped: ${chalk.gray(n)}` : `Skipped: ${chalk.yellow(n)}`);
     }
     
     // Try intelligent syntax highlighting first
-    const codeHighlighted = detectAndHighlightCode(line);
+    const codeHighlighted = detectAndHighlightCode(plainLine);
     if (codeHighlighted) {
-      // Add context icons for code blocks
-      if (/^\s*[{[]/.test(line)) return '📄 ' + codeHighlighted;
-      if (/^\s*</.test(line)) return '🏷️  ' + codeHighlighted;
-      if (/^\s*[\$#]/.test(line)) return '💻 ' + codeHighlighted;
+      if (/^\s*[{[]/.test(plainLine)) return '📄 ' + codeHighlighted;
+      if (/^\s*</.test(plainLine)) return '🏷️  ' + codeHighlighted;
+      if (/^\s*[\$#]/.test(plainLine)) return '💻 ' + codeHighlighted;
       return codeHighlighted;
     }
     
     // Docker commands with enhanced detection
-    if (/^\s*[\+>]*\s*docker/.test(line)) return chalk.blue('🐳 ' + line);
-    if (/Successfully built|Successfully tagged|Image.*built/i.test(line)) return chalk.green('✅ ' + line);
-    if (/Pulling|Downloading|Extracting/i.test(line)) return chalk.cyan('📥 ' + line);
+    if (/^\s*[\+>]*\s*docker/.test(plainLine)) return chalk.blue('🐳 ' + plainLine);
+    if (/Successfully built|Successfully tagged|Image.*built/i.test(plainLine)) return chalk.green('✅ ' + plainLine);
+    if (/Pulling|Downloading|Extracting/i.test(plainLine)) return chalk.cyan('📥 ' + plainLine);
     
     // Git operations
-    if (/^\s*[\+>]*\s*git/.test(line)) return chalk.magenta('🔧 ' + line);
-    if (/Cloning into|Clone completed/i.test(line)) return chalk.cyan('📥 ' + line);
-    if (/Switched to|Checkout|merge/i.test(line)) return chalk.blue('🔀 ' + line);
+    if (/^\s*[\+>]*\s*git/.test(plainLine)) return chalk.magenta('🔧 ' + plainLine);
+    if (/Cloning into|Clone completed/i.test(plainLine)) return chalk.cyan('📥 ' + plainLine);
+    if (/Switched to|Checkout|merge/i.test(plainLine)) return chalk.blue('🔀 ' + plainLine);
     
     // CI/CD pipeline stages
-    if (/Stage|Pipeline|Step/i.test(line) && /started|completed|running/i.test(line)) {
-      if (/completed|finished|done/i.test(line)) return chalk.green('✅ ' + line);
-      if (/started|running|executing/i.test(line)) return chalk.yellow('🔄 ' + line);
-      if (/failed|error/i.test(line)) return chalk.red('❌ ' + line);
+    if (/Stage|Pipeline|Step/i.test(plainLine) && /started|completed|running/i.test(plainLine)) {
+      if (/completed|finished|done/i.test(plainLine)) return chalk.green('✅ ' + plainLine);
+      if (/started|running|executing/i.test(plainLine)) return chalk.yellow('🔄 ' + plainLine);
+      if (/failed|error/i.test(plainLine)) return chalk.red('❌ ' + plainLine);
     }
     
     // File system operations
-    if (/^\s*[\+>]*\s*(mkdir|rm|cp|mv|chmod|chown)/.test(line)) return chalk.gray('📁 ' + line);
+    if (/^\s*[\+>]*\s*(mkdir|rm|cp|mv|chmod|chown)/.test(plainLine)) return chalk.gray('📁 ' + plainLine);
     
     // Compilation and build tools
-    if (/^\s*[\+>]*\s*(npm|yarn|pip|mvn|gradle|make|cargo|go build)/.test(line)) return chalk.blue('🔨 ' + line);
+    if (/^\s*[\+>]*\s*(npm|yarn|pip|mvn|gradle|make|cargo|go build)/.test(plainLine)) return chalk.blue('🔨 ' + plainLine);
     
     // Diff style (enhanced)
-    if (/^@@ .* @@/.test(line)) return chalk.magenta.bold(line);
-    if (/^[+][^+]/.test(line)) return chalk.green('+ ' + line.slice(1));
-    if (/^-[^-]/.test(line)) return chalk.red('- ' + line.slice(1));
+    if (/^@@ .* @@/.test(plainLine)) return chalk.magenta.bold(plainLine);
+    if (/^[+][^+]/.test(plainLine)) return chalk.green('+ ' + plainLine.slice(1));
+    if (/^-[^-]/.test(plainLine)) return chalk.red('- ' + plainLine.slice(1));
+
+    let line = plainLine;
 
     // Enhanced timestamps (multiple formats) with better detection
     line = line.replace(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)/, m => chalk.dim.gray(`⏰ ${m}`));
@@ -287,6 +289,9 @@ export function formatLogsChunk(chunk) {
       return chalk.dim(line);
     }
 
+    // Strip any remaining ANSI codes (both proper escape sequences and bare bracket codes)
+    line = line.replace(/\x1b\[[0-9;]*m/g, ''); // Real ANSI codes
+    line = line.replace(/\[([0-9]{1,3}(;[0-9]{1,3})*)?m/g, ''); // Bare bracket codes from Jenkins
     return line;
   }).join('\n');
 }

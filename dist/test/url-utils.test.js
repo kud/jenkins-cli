@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeUrl, ensureScheme, parseBuildSpecifier } from '../src/url-utils.js';
+import { resolveFromDist } from './helpers/ts-imports.js';
+const { normalizeUrl, ensureScheme, parseBuildSpecifier } = await import(resolveFromDist('src/url-utils.js'));
 test('normalizeUrl adds missing //', () => {
     assert.equal(normalizeUrl('https:ci.example.com'), 'https://ci.example.com');
 });

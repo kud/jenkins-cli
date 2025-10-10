@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
+import { resolveFromDist } from './helpers/ts-imports.js';
 // Create isolated HOME before importing module
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'jenkins-cli-home-salvage-'));
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
-const cfgMod = await import('../src/config.js');
+const cfgMod = await import(resolveFromDist('src/config.js'));
 const { CONFIG_FILE, loadConfig, saveConfig, resolveConfig } = cfgMod;
 // Corrupted file with markdown link and trailing garbage
 const dir = path.dirname(CONFIG_FILE);
