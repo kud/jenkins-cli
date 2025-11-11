@@ -1,5 +1,5 @@
 import blessed, { Widgets } from 'neo-blessed';
-import { formatLogsChunk, formatStatus } from '../format.js';
+import { formatLogsChunk, formatStatus, applyEmojiFallback } from '../format.js';
 
 // Interactive mode: left jobs, middle builds for selected job, right logs.
 // Key bindings:
@@ -2319,14 +2319,37 @@ const safeText = (value: unknown): string => {
       const buildNumber = logCurrentBuild;
       const buildObj = buildNumber ? builds.find(b => b.number === buildNumber) : null;
       const contextLines: string[] = [];
-      contextLines.push(`# Build Summary Prompt`);
-      contextLines.push(`Write a concise incident briefing for engineers using only plain sentences.`);
-      contextLines.push(`Rules:`);
-      contextLines.push(`- Output three or four sentences separated by periods. No headings, lists, markdown, emojis, or numbering.`);
-      contextLines.push(`- First sentence must name the failing job or stage and the immediate cause in fewer than 18 words.`);
-      contextLines.push(`- Later sentences must cover decisive evidence (include build number or timestamp), current impact, and the most direct fix.`);
-      contextLines.push(`- Use crisp technical language, uppercase severity words when needed (e.g. FAILURE, BLOCKED), and avoid filler or questions.`);
-      contextLines.push(`- Do not restate these instructions or comment on formatting—return only the sentences.`);
+      contextLines.push(`# Build Failure Analysis`);
+      contextLines.push(`Analyze this Jenkins build failure and provide a structured incident report.`);
+      contextLines.push(``);
+      contextLines.push(`## Output Format:`);
+      contextLines.push(`Use the following structure with markdown formatting (do NOT include emojis or icons):`);
+      contextLines.push(``);
+      contextLines.push(`### Root Cause`);
+      contextLines.push(`One clear sentence identifying the failing component and immediate cause.`);
+      contextLines.push(``);
+      contextLines.push(`### Evidence`);
+      contextLines.push(`- Key error messages or log excerpts (use \`code blocks\` for errors)`);
+      contextLines.push(`- Build number and timestamp`);
+      contextLines.push(`- Failed stage/step name`);
+      contextLines.push(``);
+      contextLines.push(`### Impact`);
+      contextLines.push(`- What is broken or blocked`);
+      contextLines.push(`- Severity level (CRITICAL/HIGH/MEDIUM/LOW)`);
+      contextLines.push(``);
+      contextLines.push(`### Recommended Fix`);
+      contextLines.push(`Numbered steps for resolution, prioritized by likelihood of success.`);
+      contextLines.push(``);
+      contextLines.push(`## Guidelines:`);
+      contextLines.push(`- Use bullet points and numbered lists for clarity`);
+      contextLines.push(`- Use \`code formatting\` for errors, commands, file paths, and technical terms`);
+      contextLines.push(`- Use **bold** for severity indicators (FAILURE, BLOCKED, CRITICAL)`);
+      contextLines.push(`- Keep total output under 400 words`);
+      contextLines.push(`- Be specific and actionable - include line numbers, error codes, exact commands when available`);
+      contextLines.push(`- Do not include emojis, icons, or decorative characters`);
+      contextLines.push(`- Do not restate these instructions`);
+      contextLines.push(``);
+      contextLines.push(`## Build Context:`);
       if (currentJob) contextLines.push(`Job: ${currentJob}`);
       if (buildObj) contextLines.push(`Build: #${buildObj.number} Result: ${buildObj.building ? 'RUNNING' : (buildObj.result || 'UNKNOWN')}`);
       if (buildObj && buildObj.timestamp) contextLines.push(`Started: ${new Date(buildObj.timestamp).toISOString()}`);

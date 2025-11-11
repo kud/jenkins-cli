@@ -1,9 +1,17 @@
 import chalk from 'chalk';
 import hljs from 'highlight.js';
 
-const DISABLE_UNICODE_ICONS = process.env.JENKINS_CLI_NO_ICONS === '1' || process.env.JENKINS_CLI_PLAIN === '1' || process.env.TERM_PROGRAM === 'vscode' || process.env.CI || process.env.TERM === 'dumb';
-const emojiRegex = /✅|❌|⚠️|✂️|⏰|💥|📄|🏷️|💻|🐳|🔧|🔀|🔄|📥|📁|🔨|🔍|⏭️|📌|✨|🔥|💀|🐛|🔗|⋯/g;
-const ICON_FALLBACK: Record<string,string> = { '✅': '[OK]', '❌': '[X]', '⚠️': '[!]', '✂️':'[CUT]', '⏰':'[T]', '💥':'[ERR]', '📄':'[F]', '🏷️':'[TAG]', '💻':'[CMD]', '🐳':'[DOCKER]', '🔧':'[GIT]', '🔀':'[MERGE]', '🔄':'[...]', '📥':'[DL]', '📁':'[DIR]', '🔨':'[BUILD]', '🔍':'[SRCH]', '⏭️':'[SKIP]', '📌':'[*]', '✨':'*', '🔥':'[ERR]', '💀':'[FATAL]', '🐛':'[DBG]', '🔗':'[URL]', '⋯':'...' };
+const effectiveLocale = process.env.LC_ALL || process.env.LANG || '';
+const DISABLE_UNICODE_ICONS = process.env.JENKINS_CLI_NO_ICONS === '1' ||
+  process.env.JENKINS_CLI_PLAIN === '1' ||
+  process.env.TERM_PROGRAM === 'vscode' ||
+  process.env.CI === 'true' ||
+  process.env.TERM === 'dumb' ||
+  process.env.TERM === 'linux' ||
+  (effectiveLocale && !effectiveLocale.includes('UTF')) || // No UTF-8 locale
+  effectiveLocale === 'C'; // POSIX locale
+const emojiRegex = /✅|❌|⚠️|✂️|⏰|💥|📄|🏷️|💻|🐳|🔧|🔀|🔄|📥|📁|🔨|🔍|⏭️|📌|✨|🔥|💀|🐛|🔗|⋯|🎯|📊/g;
+const ICON_FALLBACK: Record<string,string> = { '✅': '[OK]', '❌': '[X]', '⚠️': '[!]', '✂️':'[CUT]', '⏰':'[T]', '💥':'[ERR]', '📄':'[F]', '🏷️':'[TAG]', '💻':'[CMD]', '🐳':'[DOCKER]', '🔧':'[FIX]', '🔀':'[MERGE]', '🔄':'[...]', '📥':'[DL]', '📁':'[DIR]', '🔨':'[BUILD]', '🔍':'[SRCH]', '⏭️':'[SKIP]', '📌':'[*]', '✨':'*', '🔥':'[ERR]', '💀':'[FATAL]', '🐛':'[DBG]', '🔗':'[URL]', '⋯':'...', '🎯':'[ROOT]', '📊':'[DATA]' };
 
 const statusColor = (result) => {
   switch (result) {
@@ -294,4 +302,11 @@ export function formatLogsChunk(chunk) {
     line = line.replace(/\[([0-9]{1,3}(;[0-9]{1,3})*)?m/g, ''); // Bare bracket codes from Jenkins
     return line;
   }).join('\n');
+}
+
+export function applyEmojiFallback(text: string): string {
+  if (DISABLE_UNICODE_ICONS) {
+    return text.replace(emojiRegex, m => ICON_FALLBACK[m] || '');
+  }
+  return text;
 }
