@@ -1055,7 +1055,12 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
        currentBuild.result === 'UNSTABLE' ? 'yellow' : 'cyan');
     
     const startTime = currentBuild.timestamp ? new Date(currentBuild.timestamp).toLocaleString() : 'Unknown';
-    const description = stripHtml(currentBuild.description) || 'No description';
+    const rawDescription = stripHtml(currentBuild.description) || 'No description';
+    // Truncate long descriptions to fit on one line (approx 80 chars for 60% width terminal)
+    const maxDescLength = 100;
+    const description = rawDescription.length > maxDescLength
+      ? rawDescription.substring(0, maxDescLength) + '...'
+      : rawDescription;
     
     // Try to extract user from build data or actions
     let startedBy = 'Unknown';
@@ -1329,7 +1334,11 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
       const status = 'RUNNING'; // Always running during follow
       const duration = `~${Math.round((Date.now() - (currentBuild.timestamp || Date.now()))/1000)}s`;
       const startTime = currentBuild.timestamp ? new Date(currentBuild.timestamp).toLocaleString() : 'Unknown';
-      const description = stripHtml(currentBuild.description) || 'No description';
+      const rawDescription = stripHtml(currentBuild.description) || 'No description';
+      const maxDescLength = 100;
+      const description = rawDescription.length > maxDescLength
+        ? rawDescription.substring(0, maxDescLength) + '...'
+        : rawDescription;
       
       metadataBox.setContent(
         `{bold}{white-fg}Build:{/} {bold}#${num}{/}  {bold}{white-fg}Status:{/} {yellow-fg}${status}{/}  {bold}{white-fg}Duration:{/} {cyan-fg}${duration}{/}\n` +
