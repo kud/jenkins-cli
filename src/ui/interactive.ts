@@ -717,6 +717,54 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     
     return result;
   };
+
+  // Helper function to format job status based on Jenkins color field
+  const formatJobStatus = (job) => {
+    const color = job.color || '';
+    const name = job.fullName || job.name || '';
+
+    // Handle error state
+    if (job.error) {
+      return `{red-fg}${name} {gray-fg}[ERROR]{/}`;
+    }
+
+    // Map Jenkins color to status and color tag
+    let status = '';
+    let tagStart = '';
+
+    if (color.includes('anime')) {
+      // Building
+      status = 'BUILDING';
+      tagStart = '{yellow-fg}';
+    } else if (color === 'blue') {
+      status = 'SUCCESS';
+      tagStart = '{green-fg}';
+    } else if (color === 'red') {
+      status = 'FAILURE';
+      tagStart = '{red-fg}';
+    } else if (color === 'yellow') {
+      status = 'UNSTABLE';
+      tagStart = '{magenta-fg}';
+    } else if (color === 'aborted') {
+      status = 'ABORTED';
+      tagStart = '{cyan-fg}';
+    } else if (color === 'disabled' || color === 'grey' || color === 'gray') {
+      status = 'DISABLED';
+      tagStart = '{gray-fg}';
+    } else if (color === 'notbuilt') {
+      status = 'NOT BUILT';
+      tagStart = '{gray-fg}';
+    } else {
+      // Unknown state
+      status = '';
+      tagStart = '{white-fg}';
+    }
+
+    // Format: name + status indicator
+    const statusText = status ? ` {gray-fg}[${status}]{/}` : '';
+    return `${tagStart}${name}${statusText}{/}`;
+  };
+
   const shortcutHints = () => {
     const segments = [];
 
@@ -806,12 +854,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
         filteredJobs = jobs.slice();
         
         if (!singleJobMode) {
-          jobsBox.setItems(filteredJobs.map(j => {
-            if (j.error) {
-              return `{red-fg}${j.fullName || j.name} - ERROR{/}`;
-            }
-            return `{white-fg}${j.fullName || j.name}{/}`;
-          }));
+          jobsBox.setItems(filteredJobs.map(j => formatJobStatus(j)));
           jobsBox.select(0); // Ensure first job is selected and scroll to it
         }
         
@@ -857,14 +900,14 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
         const denom = stats.processed + stats.queued;
         const pct = denom === 0 ? 0 : Math.round((stats.processed / denom) * 100);
         if (now - lastRender > 200 && !singleJobMode) { // throttle to ~5fps
-          jobsBox.setItems(filteredJobs.map(j => `{white-fg}${j.fullName || j.name}{/}`));
+          jobsBox.setItems(filteredJobs.map(j => formatJobStatus(j)));
         setStatus(`Loading jobs... ${stats.total} (${pct}%)`, { suppressShortcuts: true });
           lastRender = now;
         }
       }});
-      
+
       if (!singleJobMode) {
-        jobsBox.setItems(filteredJobs.map(j => `{white-fg}${j.fullName || j.name}{/}`));
+        jobsBox.setItems(filteredJobs.map(j => formatJobStatus(j)));
       }
       
       if (preselectJob) {
@@ -1115,8 +1158,8 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     // Reset log label to simple title
     logBox.setLabel(' Logs ');
     
-    // Enhanced loading state with progress
-    logBox.setContent(`{yellow-fg}📥 Fetching logs for build #${num}...{/}\n\n{gray-fg}Please wait while we retrieve the console output...\n\n{cyan-fg}✨ Enhanced log viewer features:{/}\n{gray-fg}• Line numbers and bookmarks\n• Syntax highlighting\n• Jump to log levels\n• Search with navigation{/}`); 
+    // Show skeleton/placeholder on first line while loading
+    logBox.setContent(`{cyan-fg}⏳ Loading logs for build #${num}...{/}`);
     logBox.setScrollPerc(0); // Ensure loading message is visible at top
     screen.render();
     
@@ -1127,7 +1170,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
         const b = builds.find(bd => bd.number === num);
         if (b && b.building) {
           follow = true;
-          logBox.setContent(`{blue-fg}🔄 Build #${num} is running...{/}\n\n{gray-fg}Auto-follow enabled. Logs will stream as they become available.\n\nPress 'f' to toggle follow mode.{/}`);
+          logBox.setContent(`{yellow-fg}⏳ Build #${num} is running... (auto-follow enabled){/}`);
           logBox.setScrollPerc(0);
           screen.render();
           setStatus('{blue-fg}Auto-follow enabled (running build, no output yet){/}');
@@ -1350,9 +1393,9 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     
     // Reset log label to simple title
     logBox.setLabel(' Logs ');
-    
-    // Enhanced follow loading state
-    logBox.setContent(`{cyan-fg}🔄 Following build #${num}...{/}\n\n{gray-fg}Streaming console output in real-time.\nPress 'f' to stop following.\nPress '/' to search in logs{/}`);
+
+    // Show skeleton/placeholder on first line while following
+    logBox.setContent(`{yellow-fg}⏳ Following build #${num}... (streaming){/}`);
     screen.render();
     
     try {
@@ -1414,7 +1457,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     // Show immediate loading feedback for valid jobs
     setStatus(`{yellow-fg}Loading ${currentJob}...{/}`, { suppressShortcuts: true });
     buildsBox.setItems(['{gray-fg}Loading...{/}']);
-    logBox.setContent(`{yellow-fg}📋 Loading job: ${currentJob}{/}\n\n{gray-fg}Fetching recent builds and build information...{/}`);
+    logBox.setContent(`{cyan-fg}⏳ Loading job: ${currentJob}...{/}`);
     logBox.setScrollPerc(0);
     screen.render();
     
@@ -1437,8 +1480,10 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     
     // Show immediate loading feedback for build selection
     setStatus(`{yellow-fg}Loading build #${b.number}...{/}`, { suppressShortcuts: true });
+    logBox.setContent(`{cyan-fg}⏳ Loading build #${b.number}...{/}`);
+    screen.render();
     if (follow) {
-      startFollow(b.number); 
+      startFollow(b.number);
     } else {
       loadLogs(b.number);
     }
@@ -1465,13 +1510,44 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     
     filteredJobs = jobsWithScores.map(item => item.job);
     
-    // Display with highlighting
+    // Display with highlighting and status
     const displayItems = jobsWithScores.map(item => {
-      const jobName = item.job.fullName || item.job.name;
+      // For search highlighting, we need to preserve the match highlighting while adding status
       if (query && item.matches.length > 0) {
-        return `{white-fg}${highlightMatches(jobName, item.matches, 'yellow-bg')}{/}`;
+        const jobName = item.job.fullName || item.job.name;
+        const highlighted = highlightMatches(jobName, item.matches, 'yellow-bg');
+
+        // Add status to highlighted name
+        const color = item.job.color || '';
+        let status = '';
+        let tagStart = '';
+
+        if (item.job.error) {
+          return `{red-fg}${highlighted} {gray-fg}[ERROR]{/}`;
+        } else if (color.includes('anime')) {
+          status = 'BUILDING'; tagStart = '{yellow-fg}';
+        } else if (color === 'blue') {
+          status = 'SUCCESS'; tagStart = '{green-fg}';
+        } else if (color === 'red') {
+          status = 'FAILURE'; tagStart = '{red-fg}';
+        } else if (color === 'yellow') {
+          status = 'UNSTABLE'; tagStart = '{magenta-fg}';
+        } else if (color === 'aborted') {
+          status = 'ABORTED'; tagStart = '{cyan-fg}';
+        } else if (color === 'disabled' || color === 'grey' || color === 'gray') {
+          status = 'DISABLED'; tagStart = '{gray-fg}';
+        } else if (color === 'notbuilt') {
+          status = 'NOT BUILT'; tagStart = '{gray-fg}';
+        } else {
+          tagStart = '{white-fg}';
+        }
+
+        const statusText = status ? ` {gray-fg}[${status}]{/}` : '';
+        return `${tagStart}${highlighted}${statusText}{/}`;
       }
-      return `{white-fg}${jobName}{/}`;
+
+      // No search query, use standard formatting
+      return formatJobStatus(item.job);
     });
     
     if (!singleJobMode) {
@@ -1650,7 +1726,7 @@ export async function runInteractive(client: JenkinsClient, { jobSearchLimit = 0
     process.exit(0);
   });
   screen.key('r', async () => { if (isTyping()) return; await refreshJobs(); await refreshBuilds(); });
-  screen.key('f', () => { if (isTyping()) return; follow = !follow; setStatus((follow? 'Follow ON' : 'Follow OFF')); });
+  screen.key('f', () => { if (isTyping()) return; follow = !follow; setStatus(); });
   
   // Open job/build in browser or toggle wrap (logs focused)
   screen.key('w', async () => {
