@@ -53,9 +53,9 @@
   },
   "devDependencies": {
     "@types/commander": "2.12.5",
-    "@types/node": "24.10.0",
+    "@types/node": "25.0.9",
     "@types/node-fetch": "2.6.13",
-    "tsx": "4.20.6",
+    "tsx": "4.21.0",
     "typescript": "5.9.3"
   }
 }
