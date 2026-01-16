@@ -1,15 +1,21 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { loadConfig, saveConfig, resolveConfig, addServer, useServer, removeServer, listServers, CONFIG_FILE } from '../src/config.js';
 import { JenkinsClient } from '../src/jenkins-client.js';
 import { formatStatus, formatBuildList, formatError, formatLogsChunk } from '../src/format.js';
 import { normalizeUrl, ensureScheme, parseBuildSpecifier } from '../src/url-utils.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
+
 const program = new Command();
 program
   .name('jenkins')
   .description('Lightweight Jenkins CLI (status, logs, trigger, list, artifacts, open, search, multi-server)')
-  .version('0.2.0')
+  .version(pkg.version)
   .option('--url <url>', 'Jenkins base URL')
   .option('--user <user>', 'Jenkins username')
   .option('--token <token>', 'Jenkins API token')
