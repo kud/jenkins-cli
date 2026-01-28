@@ -9,7 +9,7 @@ import { formatStatus, formatBuildList, formatError, formatLogsChunk } from '../
 import { normalizeUrl, ensureScheme, parseBuildSpecifier } from '../src/url-utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
+const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
 
 const program = new Command();
 program
@@ -29,7 +29,7 @@ program
   .option('--basic-colors', 'Force basic (no truecolor) colors in TUIs')
   .option('--no-terminfo', 'Disable terminfo/tput features (avoids Setulc warnings)')
   .option('--project <job>', 'Preselect job in interactive explorer')
-  .option('--jobs <jobs>', 'Filter/specify jobs (comma-separated). Single job hides Jobs panel.');
+  .option('--jobs <jobs>', 'Filter/specify jobs in interactive mode (comma-separated). Single job hides Jobs panel.');
 
 // Enhanced guidance for missing required positional arguments (non-interactive usage)
 program.showHelpAfterError();
@@ -438,6 +438,19 @@ program.action(async () => {
       process.exit(1);
     }
   } else {
+    if (opts.jobs) {
+      console.error('Error: --jobs option only works with interactive mode (-i or --interactive)');
+      console.error('');
+      console.error('Examples:');
+      console.error('  jenkins -i --jobs "my-job"');
+      console.error('  jenkins --interactive --jobs "job1,job2"');
+      console.error('');
+      console.error('For non-interactive usage, use specific commands:');
+      console.error('  jenkins status my-job');
+      console.error('  jenkins logs my-job -f');
+      console.error('  jenkins list my-job');
+      process.exit(1);
+    }
     program.outputHelp();
   }
 });
