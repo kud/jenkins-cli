@@ -389,6 +389,27 @@ program.command('ui <job>')
     }
   });
 
+program.command('watch <job>')
+  .description('Watch latest build of a job with auto-refresh (focused dashboard)')
+  .option('-i, --interval <ms>', 'Auto-refresh interval in milliseconds', '5000')
+  .action(async (job, cmd) => {
+    try {
+      const client = await getClient();
+      const { runWatch } = await import('../src/ui/watch.js');
+      const root = program.opts();
+      const refreshInterval = parseInt(cmd.interval, 10) || 5000;
+      await runWatch(client, {
+        job,
+        refreshInterval,
+        forceBasicColor: !!root.basicColors,
+        noTerminfo: !!root.noTerminfo
+      });
+    } catch (e) {
+      formatError(e);
+      process.exit(1);
+    }
+  });
+
 program.command('interactive')
   .description('Interactive multi-job explorer (jobs, builds, logs)')
   .option('-j, --jobs-limit <n>', 'Set manual job cap (default unlimited; 0 = unlimited)', '0')

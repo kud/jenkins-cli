@@ -20,14 +20,55 @@ const statusColor = (result) => {
         default: return chalk.cyan(result || 'RUNNING');
     }
 };
-export function formatStatus(build, { pretty = false } = {}) {
-    const { number, result, building, duration, estimatedDuration, timestamp } = build;
-    if (pretty) {
-        const state = building ? chalk.blue('RUNNING') : result ? statusColor(result) : chalk.blue('RUNNING');
-        const dur = building ? `~${Math.round(duration / 1000)}s` : `${Math.round(duration / 1000)}s`;
-        return `Build #${number}: ${state} (${dur})`;
+const formatDuration = (milliseconds) => {
+    if (!milliseconds)
+        return 'N/A';
+    const seconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0) {
+        const remainingMinutes = minutes % 60;
+        return `${hours}h ${remainingMinutes}m`;
     }
-    return `#${number} ${building ? 'RUNNING' : (result || 'UNKNOWN')} duration=${duration}`;
+    else if (minutes > 0) {
+        const remainingSeconds = seconds % 60;
+        return `${minutes}m ${remainingSeconds}s`;
+    }
+    else {
+        return `${seconds}s`;
+    }
+};
+const formatTimestamp = (timestamp) => {
+    if (!timestamp)
+        return '';
+    const date = new Date(timestamp);
+    return date.toLocaleString();
+};
+export function formatStatus(build, { pretty = false } = {}) {
+    const { number, result, building, duration, estimatedDuration, timestamp, url } = build;
+    // Always use colors unless explicitly disabled
+    const useColor = process.env.NO_COLOR !== '1';
+    if (!useColor) {
+        // Plain text fallback
+        return `#${number} ${building ? 'RUNNING' : (result || 'UNKNOWN')} duration=${duration}`;
+    }
+    // Colorful output by default
+    const buildNumber = chalk.bold.white(`#${number}`);
+    const state = building ? chalk.blue.bold('RUNNING 🔄') : statusColor(result || 'UNKNOWN');
+    const dur = formatDuration(duration);
+    const durationText = building
+        ? chalk.cyan(`Duration: ~${dur}`)
+        : chalk.cyan(`Duration: ${dur}`);
+    let output = `${buildNumber} ${state}\n${durationText}`;
+    if (timestamp) {
+        const timeText = chalk.dim(`Started: ${formatTimestamp(timestamp)}`);
+        output += `\n${timeText}`;
+    }
+    if (url) {
+        const urlText = chalk.underline.blue(`URL: ${url}`);
+        output += `\n${urlText}`;
+    }
+    return output;
 }
 export function formatBuildList(builds, { pretty = false } = {}) {
     return builds.map(b => formatStatus(b, { pretty })).join('\n');

@@ -8,7 +8,7 @@ import { JenkinsClient } from '../src/jenkins-client.js';
 import { formatStatus, formatBuildList, formatError, formatLogsChunk } from '../src/format.js';
 import { normalizeUrl, ensureScheme, parseBuildSpecifier } from '../src/url-utils.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
+const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
 const program = new Command();
 program
     .name('jenkins')
@@ -27,7 +27,7 @@ program
     .option('--basic-colors', 'Force basic (no truecolor) colors in TUIs')
     .option('--no-terminfo', 'Disable terminfo/tput features (avoids Setulc warnings)')
     .option('--project <job>', 'Preselect job in interactive explorer')
-    .option('--jobs <jobs>', 'Filter/specify jobs (comma-separated). Single job hides Jobs panel.');
+    .option('--jobs <jobs>', 'Filter/specify jobs in interactive mode (comma-separated). Single job hides Jobs panel.');
 // Enhanced guidance for missing required positional arguments (non-interactive usage)
 program.showHelpAfterError();
 program.configureOutput({
@@ -477,6 +477,27 @@ program.command('ui <job>')
         process.exit(1);
     }
 });
+program.command('watch <job>')
+    .description('Watch latest build of a job with auto-refresh (focused dashboard)')
+    .option('-i, --interval <ms>', 'Auto-refresh interval in milliseconds', '5000')
+    .action(async (job, cmd) => {
+    try {
+        const client = await getClient();
+        const { runWatch } = await import('../src/ui/watch.js');
+        const root = program.opts();
+        const refreshInterval = parseInt(cmd.interval, 10) || 5000;
+        await runWatch(client, {
+            job,
+            refreshInterval,
+            forceBasicColor: !!root.basicColors,
+            noTerminfo: !!root.noTerminfo
+        });
+    }
+    catch (e) {
+        formatError(e);
+        process.exit(1);
+    }
+});
 program.command('interactive')
     .description('Interactive multi-job explorer (jobs, builds, logs)')
     .option('-j, --jobs-limit <n>', 'Set manual job cap (default unlimited; 0 = unlimited)', '0')
@@ -528,6 +549,19 @@ program.action(async () => {
         }
     }
     else {
+        if (opts.jobs) {
+            console.error('Error: --jobs option only works with interactive mode (-i or --interactive)');
+            console.error('');
+            console.error('Examples:');
+            console.error('  jenkins -i --jobs "my-job"');
+            console.error('  jenkins --interactive --jobs "job1,job2"');
+            console.error('');
+            console.error('For non-interactive usage, use specific commands:');
+            console.error('  jenkins status my-job');
+            console.error('  jenkins logs my-job -f');
+            console.error('  jenkins list my-job');
+            process.exit(1);
+        }
         program.outputHelp();
     }
 });
