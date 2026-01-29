@@ -205,6 +205,50 @@ export class JenkinsClient {
     return this._request<any>('queue/api/json');
   }
 
+  async getQueueItem(id: number | string): Promise<any> {
+    return this._request<any>(`queue/item/${id}/api/json`);
+  }
+
+  async waitForBuild(queueLocation: string, opts: { timeout?: number; interval?: number } = {}): Promise<{ buildNumber: number; buildUrl: string } | null> {
+    const timeout = opts.timeout ?? 60000; // 60 seconds default
+    const interval = opts.interval ?? 2000; // 2 seconds polling interval
+    const start = Date.now();
+
+    // Extract queue item ID from location
+    const match = queueLocation.match(/\/queue\/item\/(\d+)/);
+    if (!match) return null;
+    const queueId = match[1];
+
+    while (Date.now() - start < timeout) {
+      try {
+        const item = await this.getQueueItem(queueId);
+
+        // Check if build has started (executable property contains build info)
+        if (item.executable?.number && item.executable?.url) {
+          return {
+            buildNumber: item.executable.number,
+            buildUrl: item.executable.url
+          };
+        }
+
+        // Check if item was cancelled or failed
+        if (item.cancelled) {
+          throw new Error('Build was cancelled');
+        }
+
+      } catch (error) {
+        // If queue item not found, it might have been processed already
+        if (error.status === 404) {
+          return null;
+        }
+      }
+
+      await sleep(interval);
+    }
+
+    return null; // Timeout reached
+  }
+
   async cancelQueueItem(id: number | string): Promise<{ cancelled: true }> {
     const crumb = await this._getCrumb();
     const headers: Record<string,string> = { Authorization: this.authHeader };

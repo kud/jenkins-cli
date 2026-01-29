@@ -34,6 +34,14 @@ export declare class JenkinsClient {
         stopped: true;
     }>;
     getQueue(): Promise<any>;
+    getQueueItem(id: number | string): Promise<any>;
+    waitForBuild(queueLocation: string, opts?: {
+        timeout?: number;
+        interval?: number;
+    }): Promise<{
+        buildNumber: number;
+        buildUrl: string;
+    } | null>;
     cancelQueueItem(id: number | string): Promise<{
         cancelled: true;
     }>;

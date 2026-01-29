@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import chalk from 'chalk';
 import { loadConfig, saveConfig, resolveConfig, addServer, useServer, removeServer, listServers, CONFIG_FILE } from '../src/config.js';
 import { JenkinsClient } from '../src/jenkins-client.js';
 import { formatStatus, formatBuildList, formatError, formatLogsChunk } from '../src/format.js';
@@ -268,6 +269,8 @@ program.command('trigger <jobOrUrl>')
 program.command('build <job>')
     .description('Trigger a build, optionally with parameters (repeat --param)')
     .option('--param <k=v>', 'Parameter (repeatable)', (v, p) => { p.push(v); return p; }, [])
+    .option('--wait', 'Wait for build to start and show build URL')
+    .option('--json', 'Output raw JSON response')
     .action(async (job, cmd) => {
     try {
         const client = await getClient();
@@ -283,7 +286,40 @@ program.command('build <job>')
             params[k] = v;
         }
         const res = Object.keys(params).length ? await client.triggerBuildWithParameters(job, params) : await client.triggerBuild(job);
-        console.log(res);
+        if (cmd.json) {
+            console.log(JSON.stringify(res, null, 2));
+            return;
+        }
+        console.log(chalk.green(`✓ Build queued successfully for '${chalk.bold(job)}'`));
+        if (Object.keys(params).length > 0) {
+            console.log(chalk.cyan('\nParameters:'));
+            for (const [k, v] of Object.entries(params)) {
+                console.log(chalk.cyan(`  ${chalk.bold(k)}: `) + chalk.white(v));
+            }
+        }
+        if (cmd.wait && res.location) {
+            console.log(chalk.gray('\nWaiting for build to start...'));
+            const buildInfo = await client.waitForBuild(res.location);
+            if (buildInfo) {
+                const consoleUrl = buildInfo.buildUrl.replace(/\/$/, '') + '/console';
+                console.log(chalk.green(`\n✓ Build #${chalk.bold(buildInfo.buildNumber)} started`));
+                console.log(chalk.blue('Build URL: ') + chalk.underline(buildInfo.buildUrl));
+                console.log(chalk.blue('Console URL: ') + chalk.underline(consoleUrl));
+                console.log(chalk.yellow('\nNext steps:'));
+                console.log(chalk.white(`  jenkins logs ${job} ${buildInfo.buildNumber} -f`));
+                console.log(chalk.white(`  jenkins status ${job} ${buildInfo.buildNumber}`));
+            }
+            else {
+                console.log(chalk.yellow('\n⚠ Build did not start within timeout period'));
+                console.log(chalk.white('Use `jenkins list` to check if it started later'));
+            }
+        }
+        else {
+            console.log(chalk.yellow('\nNext steps:'));
+            console.log(chalk.white(`  jenkins list ${job}`));
+            console.log(chalk.white(`  jenkins logs ${job} -f`));
+            console.log(chalk.gray(`\nTip: Use --wait to automatically get the build URL when it starts`));
+        }
     }
     catch (e) {
         formatError(e);
