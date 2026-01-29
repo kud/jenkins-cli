@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname } from 'path';
 import chalk from 'chalk';
 import { loadConfig, saveConfig, resolveConfig, addServer, useServer, removeServer, listServers, CONFIG_FILE } from '../src/config.js';
 import { JenkinsClient } from '../src/jenkins-client.js';
 import { formatStatus, formatBuildList, formatError, formatLogsChunk } from '../src/format.js';
 import { normalizeUrl, ensureScheme, parseBuildSpecifier } from '../src/url-utils.js';
+import pkg from '../package.json' with { type: 'json' };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
 
 const program = new Command();
 program
