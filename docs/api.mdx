@@ -1,5 +1,5 @@
 ---
-title: "Programmatic API"
+title: "🧰 Programmatic API"
 description: "Import and use the JenkinsClient directly from your own ESM code."
 ---
 
@@ -13,7 +13,7 @@ const build = await client.getBuild("my-job");
 console.log("Result:", build.result);
 ```
 
-## Progressive Log Stream
+## 🌊 Progressive Log Stream
 
 ```ts
 await client.streamConsole("my-job", 123, (chunk) => {
@@ -21,14 +21,14 @@ await client.streamConsole("my-job", 123, (chunk) => {
 });
 ```
 
-## Search Jobs Incrementally
+## 🔍 Search Jobs Incrementally
 
 ```ts
 const jobs = await client.searchJobs("backend", 200); // cap results
 for (const j of jobs) console.log(j.fullName || j.name);
 ```
 
-## Download Artifact
+## 📥 Download Artifact
 
 ```ts
 const { artifacts } = await client.getArtifacts("my-job", 123);

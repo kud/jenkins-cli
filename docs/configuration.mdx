@@ -1,9 +1,9 @@
 ---
-title: "Configuration"
+title: "⚙️ Configuration"
 description: "Multi-server profiles, the config file, precedence rules, and the full environment variable reference."
 ---
 
-## Config File & Multi-Server
+## 🗂️ Config File & Multi-Server
 
 Location: `~/.config/jenkins-cli/config.json` (respects `$XDG_CONFIG_HOME`).
 
@@ -18,18 +18,18 @@ jenkins config use staging
 jenkins config list-servers
 ```
 
-## Precedence
+## 🪜 Precedence
 
 Highest → lowest: **CLI flags** > **Environment variables** > **Config file**.
 
-## Salvage Logic
+## 🛟 Salvage Logic
 
 The config loader automatically:
 
 - Truncates trailing garbage past the final `}` if the file is partially corrupted.
 - Normalises markdown links `[text](url)` → `url`.
 
-## Environment Variables
+## 🌱 Environment Variables
 
 | Variable                      | Purpose               | Notes                   |
 | ----------------------------- | --------------------- | ----------------------- |
