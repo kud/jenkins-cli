@@ -1,0 +1,44 @@
+---
+title: "Configuration"
+description: "Multi-server profiles, the config file, precedence rules, and the full environment variable reference."
+---
+
+## Config File & Multi-Server
+
+Location: `~/.config/jenkins-cli/config.json` (respects `$XDG_CONFIG_HOME`).
+
+```bash
+# Primary server
+jenkins config set --url https://ci.example.com --user alice --token $TOKEN
+
+# Multiple servers
+jenkins config add-server prod    --url https://ci.example.com        --user alice --token $TOKEN_PROD
+jenkins config add-server staging --url https://ci.staging.example.com --user alice --token $TOKEN_STG
+jenkins config use staging
+jenkins config list-servers
+```
+
+## Precedence
+
+Highest → lowest: **CLI flags** > **Environment variables** > **Config file**.
+
+## Salvage Logic
+
+The config loader automatically:
+
+- Truncates trailing garbage past the final `}` if the file is partially corrupted.
+- Normalises markdown links `[text](url)` → `url`.
+
+## Environment Variables
+
+| Variable                      | Purpose               | Notes                   |
+| ----------------------------- | --------------------- | ----------------------- |
+| `JENKINS_URL`                 | Base URL override     | Same as `--url`         |
+| `JENKINS_USER`                | Username override     |                         |
+| `JENKINS_TOKEN`               | Token override        |                         |
+| `JENKINS_SERVER`              | Server alias          | Chosen from config file |
+| `JENKINS_TIMEOUT`             | Request timeout (ms)  | Default 15000           |
+| `JENKINS_RETRIES`             | Retry attempts (0–9)  | Default 0               |
+| `JENKINS_CLI_NO_ICONS`        | Disable Unicode/emoji | Plain text tokens       |
+| `JENKINS_CLI_PLAIN`           | Same as above         |                         |
+| `JENKINS_CLI_ASCII_SCROLLBAR` | Force ASCII scrollbar | Usually auto-chosen     |

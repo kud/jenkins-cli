@@ -1,0 +1,42 @@
+---
+title: "Interactive Explorer"
+description: "The full-screen TUI explorer — panel layout, key bindings, and focus tricks."
+---
+
+The interactive explorer is a full-screen TUI with three panes: jobs, builds,
+and logs.
+
+```
++------------------+------------------+-----------------------------------------+
+|      Jobs        |      Builds      |                 Logs                    |
+|  (filter live)   | (#  State Dur Age)|  syntax highlight / search / follow     |
++------------------+------------------+-----------------------------------------+
+|  Status / Key Hints & Active Filters / Pane Focus Indicator / Help (?)        |
++--------------------------------------------------------------------------------
+```
+
+Launch it with:
+
+```bash
+jenkins --interactive            # root flag form
+jenkins interactive              # explicit subcommand form
+```
+
+## Key Bindings (Core)
+
+| Key     | Action                           | Key   | Action              |
+| ------- | -------------------------------- | ----- | ------------------- |
+| `q`     | Quit                             | `f`   | Toggle follow       |
+| `r`     | Refresh                          | `S`   | Toggle build sort   |
+| `1/2/3` | Focus pane                       | `t`   | Auto-refresh toggle |
+| `←/→`   | Cycle panes                      | `a`   | Artifacts popup     |
+| `/`     | Contextual search (jobs or logs) | `c`   | Clear filters       |
+| `b`     | Build text filter                | `B`   | Build fuzzy search  |
+| `m`     | Bookmark line                    | `M`   | Jump to bookmark    |
+| `e/W/i` | Jump ERROR/WARN/INFO             | `g/G` | Top / Bottom        |
+| `l`     | Toggle line numbers              | `?`   | Help overlay        |
+
+## Focus Tricks
+
+- Single job mode: `jenkins interactive --jobs my-service` hides the Jobs panel for more log real estate.
+- Emojis auto-replaced in plain terminals (CI, VS Code) → textual tokens.

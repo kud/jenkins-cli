@@ -1,0 +1,39 @@
+---
+title: "Programmatic API"
+description: "Import and use the JenkinsClient directly from your own ESM code."
+---
+
+Import the client (ESM):
+
+```ts
+import { JenkinsClient } from "@kud/jenkins-cli";
+
+const client = new JenkinsClient("https://ci.example.com", "user", "token");
+const build = await client.getBuild("my-job");
+console.log("Result:", build.result);
+```
+
+## Progressive Log Stream
+
+```ts
+await client.streamConsole("my-job", 123, (chunk) => {
+  process.stdout.write(chunk); // apply your own formatting if desired
+});
+```
+
+## Search Jobs Incrementally
+
+```ts
+const jobs = await client.searchJobs("backend", 200); // cap results
+for (const j of jobs) console.log(j.fullName || j.name);
+```
+
+## Download Artifact
+
+```ts
+const { artifacts } = await client.getArtifacts("my-job", 123);
+for (const a of artifacts) {
+  const buf = await client.downloadArtifact("my-job", 123, a.relativePath);
+  // write buffer somewhere
+}
+```

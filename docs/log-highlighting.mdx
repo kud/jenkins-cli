@@ -1,0 +1,19 @@
+---
+title: "Log Highlighting"
+description: "Pattern-based enrichment that turns plain build text into readable diagnostics."
+---
+
+Pattern-based enrichment turns plain build text into readable diagnostics.
+
+| Category     | Examples Detected                                       | Styling                               |
+| ------------ | ------------------------------------------------------- | ------------------------------------- |
+| Build Result | `BUILD SUCCESS`, `BUILD FAILURE`, `UNSTABLE`            | Coloured + icon                       |
+| Test Summary | `Tests run: X Failures: Y Errors: Z`                    | Numeric colour emphasis               |
+| Tools        | `docker pull`, `git clone`, `npm install`               | Prefixed icons & colour               |
+| Diffs        | `@@ ... @@`, `+added`, `-removed`                       | Magenta hunk / green / red            |
+| Levels       | `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, stack traces | Rich labels / dim frames              |
+| JSON Lines   | Single-line JSON objects / arrays                       | Pretty-highlighted or manual fallback |
+| Paths & URLs | `~/file.ts`, `C:\path\a.js`, `https://...`              | Cyan / underlined URLs                |
+| Progress     | `31/120 (25%)` or just `31/120`                         | Recomputed percentage                 |
+
+Disable icons entirely: `JENKINS_CLI_NO_ICONS=1` (or `JENKINS_CLI_PLAIN=1`).

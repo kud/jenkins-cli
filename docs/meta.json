@@ -1,0 +1,11 @@
+{
+  "title": "jenkins-cli",
+  "pages": [
+    "index",
+    "usage",
+    "interactive",
+    "configuration",
+    "log-highlighting",
+    "api"
+  ]
+}

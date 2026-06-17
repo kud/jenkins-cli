@@ -1,0 +1,89 @@
+---
+title: "Usage"
+description: "Scriptable command reference — the cheat sheet, non-interactive patterns, artifacts, and queue & pipeline info."
+---
+
+## Cheat Sheet
+
+| Task                | Command                                       | Notes                                    |
+| ------------------- | --------------------------------------------- | ---------------------------------------- |
+| Latest build status | `jenkins status job`                          | Add `--pretty` for coloured state + icon |
+| List builds         | `jenkins list job -l 15`                      | Uses latest N builds                     |
+| Stream logs         | `jenkins logs job -f`                         | Progressive API polling                  |
+| Static logs JSON    | `jenkins logs job --json`                     | Outputs `{ text }`                       |
+| Trigger build       | `jenkins trigger job`                         | Plain trigger (no params)                |
+| Param build         | `jenkins build job --param KEY=V --param X=Y` | Repeat flag                              |
+| Stop build          | `jenkins stop job 456`                        | Aborts running build                     |
+| Artifacts list      | `jenkins artifacts job 456`                   | Tab separated list                       |
+| Download artifacts  | `jenkins artifacts job 456 -o out/`           | All artifacts                            |
+| Filter artifacts    | `jenkins artifacts job 456 -p .jar`           | Simple substring                         |
+| Test summary        | `jenkins test-report job 456`                 | Add `--json` for details                 |
+| Pipeline stages     | `jenkins stages job 456`                      | Needs workflow-api plugin                |
+| Queue list          | `jenkins queue`                               | Items with flags                         |
+| Cancel queue        | `jenkins queue-cancel 123`                    | Immediate POST                           |
+| Search jobs         | `jenkins search api -l 200`                   | BFS substring matching                   |
+| Single-job TUI      | `jenkins ui job`                              | Build list + logs                        |
+| Multi-job TUI       | `jenkins interactive`                         | Jobs + builds + logs                     |
+
+## Non-Interactive Patterns
+
+If you see an error like `missing required argument 'jobOrUrl'`, it means the
+command expects a job name (or a full job/build URL) as the first positional
+argument.
+
+Common patterns:
+
+```bash
+# Latest build status (pretty colors)
+jenkins status my-service --pretty
+
+# Follow live logs of latest (or specific) build
+jenkins logs my-service -f
+jenkins logs my-service 128 -f
+
+# Plain console (same as logs without -f)
+jenkins console my-service
+jenkins console https://ci.example.com/job/my-service/128/
+
+# List recent builds (limit 20)
+jenkins list my-service -l 20
+```
+
+`<jobOrUrl>` accepts either:
+
+- A simple job name (folder paths use `/`, e.g. `team/backend-api`)
+- A full build URL (`.../job/<name>/<build>/`) or job URL (`.../job/<name>/`)
+
+If the build number is omitted, the CLI resolves the latest build where supported.
+
+Interactive exploration (jobs + builds + logs) still uses either:
+
+```bash
+jenkins --interactive            # root flag form
+jenkins interactive              # explicit subcommand form
+```
+
+## Artifacts
+
+```bash
+# List artifacts of latest build (auto-resolves if number omitted)
+jenkins artifacts my-job
+
+# List artifacts for specific build
+jenkins artifacts my-job 128
+
+# Download all to directory (creates if missing)
+jenkins artifacts my-job 128 -o dist/artifacts
+
+# Filter by substring (.jar) BEFORE downloading
+jenkins artifacts my-job 128 -p .jar -o jars/
+```
+
+## Queue & Pipeline Info
+
+```bash
+jenkins queue                 # List queued tasks
+jenkins queue-cancel 1234     # Cancel item
+jenkins stages my-job 456     # Pipeline stages (needs workflow-api plugin)
+jenkins test-report my-job 456 --json  # Full JUnit JSON structure
+```
