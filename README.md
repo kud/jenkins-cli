@@ -1,37 +1,74 @@
-# Jenkins CLI (Interactive + Scriptable)
+<div align="center">
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/@kud/jenkins-cli"><img alt="npm version" src="https://img.shields.io/npm/v/%40kud%2Fjenkins-cli.svg?color=28a745" /></a>
-  <a href="https://www.npmjs.com/package/@kud/jenkins-cli"><img alt="downloads" src="https://img.shields.io/npm/dm/%40kud%2Fjenkins-cli.svg" /></a>
-  <a href="#license"><img alt="license" src="https://img.shields.io/npm/l/%40kud%2Fjenkins-cli.svg" /></a>
-  <a href="https://nodejs.org"><img alt="node version" src="https://img.shields.io/node/v/@kud/jenkins-cli.svg" /></a>
-  <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" />
-</p>
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=node.js&logoColor=white)
+![npm](https://img.shields.io/npm/v/%40kud%2Fjenkins-cli?style=flat-square&color=CB3837)
+![MIT](https://img.shields.io/badge/licence-MIT-22C55E?style=flat-square)
 
-> Fast Jenkins terminal companion: a rich interactive TUI plus focused scripting commands, with smart log highlighting and multi-server profiles.
+**Fast, modern Jenkins CLI + interactive TUI (status, logs, artifacts, search, stream).**
+
+<a href="https://kud.io/projects/jenkins-cli">Website</a> · <a href="https://kud.io/projects/jenkins-cli/docs">Documentation</a>
+
+</div>
+
+## Features
+
+- **Interactive TUI** — full-screen multi-job explorer with build list and live log streaming, built on neo-blessed
+- **Log streaming** — follow build console output in real time with `logs -f`; syntax-highlighted via highlight.js
+- **Artifact management** — list, filter by pattern, and download build artifacts to a local directory
+- **Multi-server profiles** — store named server aliases with separate credentials and switch between them at any time
+- **Pipeline stages** — fetch stage-by-stage breakdown of workflow builds via the workflow-api plugin
+- **Scriptable output** — every command supports `--json` for raw API data and `--pretty` for colourised terminal output
 
 ## Install
 
-```bash
-npm i -g @kud/jenkins-cli
+```sh
+npm install -g @kud/jenkins-cli
 ```
 
-Binary: `jenkins`. Target: **Node >= 22**, pure **ESM**.
+Binary: `jenkins` · Requires Node.js >= 22
+
+## Usage
+
+```console
+$ jenkins config set --url https://jenkins.example.com --user admin --token <api-token>
+
+$ jenkins status my-pipeline
+✔ my-pipeline #42  SUCCESS  (2m 14s)
+
+$ jenkins logs my-pipeline --follow
+[Pipeline] Start of Pipeline
+[Pipeline] node
+...
+
+$ jenkins list my-pipeline --limit 5
+42  SUCCESS   2m 14s  2026-06-19
+41  FAILURE   1m 03s  2026-06-18
+40  SUCCESS   2m 08s  2026-06-17
+
+$ jenkins artifacts my-pipeline 42 --output ./downloads
+
+$ jenkins search deploy --limit 10
+deploy-prod
+deploy-staging
+deploy-preview
+
+$ jenkins interactive
+```
 
 ## Development
 
-```bash
-npm run build   # Build TS → dist/
-npm run dev     # Watch mode
-npm test        # Tests (placeholder for now)
+```sh
+git clone https://github.com/kud/jenkins-cli.git
+cd jenkins-cli
+npm install
+npm run dev
 ```
 
-Publishing runs the build automatically via `prepublishOnly`.
+| Script          | Purpose                              |
+| --------------- | ------------------------------------ |
+| `npm run build` | Compile TypeScript to `dist/`        |
+| `npm run dev`   | Run directly via tsx (no build step) |
+| `npm test`      | Run Node.js built-in test runner     |
 
-## License
-
-MIT
-
----
-
-📚 **Full documentation → https://kud.io/projects/jenkins-cli/docs**
+📚 **Full documentation → [jenkins-cli/docs](https://kud.io/projects/jenkins-cli/docs)**
