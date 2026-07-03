@@ -37,6 +37,10 @@
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kud/jenkins-cli"
+  },
   "engines": {
     "node": ">=22"
   },
