@@ -160,7 +160,11 @@ export const App = ({
   const [logLines, setLogLines] = useState<LogLine[]>([])
   const [logScroll, setLogScroll] = useState(0)
   const [showLineNumbers, setShowLineNumbers] = useState(true)
-  const [wrap, setWrap] = useState(false)
+  // Wrap is ON by default: it pre-segments log lines to the pane width before
+  // Ink renders, which avoids Ink's runtime truncate (unreliable with wide/emoji
+  // chars in some terminals — lines would overflow and the terminal hard-wraps,
+  // corrupting the layout). Press `w` in the logs pane to switch to truncate.
+  const [wrap, setWrap] = useState(true)
   const [bookmarks, setBookmarks] = useState<number[]>([]) // line indices
   const [logSearchApplied, setLogSearchApplied] = useState("")
   const [logMatches, setLogMatches] = useState<number[]>([])

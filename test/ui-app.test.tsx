@@ -125,8 +125,8 @@ test("x on a running build asks to confirm, then aborts it", async () => {
   unmount()
 })
 
-test("wide log lines are clipped to the pane, not wrapped into other panels", async () => {
-  const longTail = "TAILTOKEN_SHOULD_BE_CLIPPED"
+test("wide log lines stay within the terminal width (no overflow / hard-wrap bleed)", async () => {
+  const longTail = "TAILTOKEN_WRAPS_NOT_BLEEDS"
   const longClient = {
     baseUrl: "http://jenkins.test",
     async listBuilds() {
@@ -161,9 +161,12 @@ test("wide log lines are clipped to the pane, not wrapped into other panels", as
   )
   await wait(150)
   const frame = lastFrame() ?? ""
-  // the line's far tail must be truncated away (no bleed into neighbouring panels)
-  assert.doesNotMatch(frame, new RegExp(longTail))
-  // no rendered row exceeds the virtual terminal width (default 100 cols)
+  // content renders (head of the line is present)
+  assert.match(frame, /HEAD/)
+  // with wrap on (default) the tail is shown on a continuation row, not clipped
+  assert.match(frame, new RegExp(longTail))
+  // the invariant that matters: no rendered row exceeds the terminal width, so
+  // nothing reaches the screen edge to hard-wrap and bleed into other panels
   const overWide = frame
     .split("\n")
     .filter((row) => row.replace(/\x1b\[[0-9;]*m/g, "").length > 100)
