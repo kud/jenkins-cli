@@ -29,19 +29,23 @@ while open and restores your scrollback on quit.
 
 ## ⌨️ Key Bindings (Core)
 
-| Key     | Action                           | Key   | Action              |
-| ------- | -------------------------------- | ----- | ------------------- |
-| `q`     | Quit                             | `f`   | Toggle follow       |
-| `r`     | Refresh                          | `S`   | Toggle build sort   |
-| `1/2/3` | Focus pane                       | `t`   | Auto-refresh toggle |
-| `←/→`   | Cycle panes                      | `a`   | Artifacts overlay   |
-| `/`     | Contextual search (jobs or logs) | `c`   | Clear filters       |
-| `b`     | Build text filter                | `B`   | Build fuzzy search  |
-| `o`     | Folders-only (jobs)              | `L`   | Set job limit       |
-| `m`     | Bookmark line                    | `M`   | Jump to bookmark    |
-| `e/W/i` | Jump ERROR/WARN/INFO             | `g/G` | Top / Bottom        |
-| `l`     | Toggle line numbers              | `w`   | Word wrap (in logs) |
-| `n/N`   | Next / prev search match         | `?`   | Help overlay        |
+| Key     | Action                           | Key   | Action                                 |
+| ------- | -------------------------------- | ----- | -------------------------------------- |
+| `q`     | Quit                             | `f`   | Toggle follow                          |
+| `r`     | Refresh                          | `F`   | **Status filter** (multi-select modal) |
+| `1/2/3` | Focus pane                       | `S`   | **Log order** (newest/oldest first)    |
+| `←/→`   | Cycle panes                      | `t`   | Auto-refresh toggle                    |
+| `/`     | Contextual search (jobs or logs) | `a`   | Artifacts overlay                      |
+| `b`     | Build text filter                | `c`   | Clear filters                          |
+| `o`     | Folders-only (jobs)              | `L`   | Set job limit                          |
+| `m`     | Bookmark line                    | `M`   | Jump to bookmark                       |
+| `e/W/i` | Jump ERROR/WARN/INFO             | `g/G` | Top / Bottom                           |
+| `l`     | Toggle line numbers              | `w`   | Word wrap (in logs)                    |
+| `n/N`   | Next / prev search match         | `?`   | Help modal                             |
+
+Builds are always newest-first. `F` opens a modal to tick/untick which build
+**statuses** to display (Space toggles · `a` all · `n` none). Logs default to
+**newest line at the top**; `S` flips the order and jumps the scroll back to the top.
 
 ## ⏹️ Build Actions
 

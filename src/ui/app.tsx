@@ -36,7 +36,7 @@ type Mode =
   | "buildSearch"
   | "logSearch"
   | "jobLimit"
-type OverlayKind = null | "help" | "artifacts" | "actions"
+type OverlayKind = null | "help" | "artifacts" | "actions" | "statusFilter"
 
 interface ActionItem {
   key: "abort" | "trigger" | "web" | "artifacts"
@@ -44,7 +44,15 @@ interface ActionItem {
   hint: string
 }
 
-const RESULT_FILTERS = ["ALL", "RUNNING", "FAILED", "SUCCESS"] as const
+// Statuses offered in the multi-select filter modal. Any build state outside
+// this list (e.g. NOT_BUILT / UNKNOWN) is always shown.
+const BUILD_STATUSES = [
+  "SUCCESS",
+  "FAILURE",
+  "UNSTABLE",
+  "ABORTED",
+  "RUNNING",
+] as const
 const AUTO_REFRESH_MS = 10000
 
 const clamp = (v: number, lo: number, hi: number) =>
@@ -149,6 +157,12 @@ export const App = ({
   const listRows = Math.max(1, bodyHeight - 3)
   const logRowsRef = useRef(logRows)
   logRowsRef.current = logRows
+  // Where "the latest line" lives: top (0) when descending, bottom otherwise.
+  const logDescendingRef = useRef(true)
+  const scrollToLatest = (logicalLineCount: number) =>
+    logDescendingRef.current
+      ? 0
+      : Math.max(0, logicalLineCount - logRowsRef.current)
 
   // ---- data state ----------------------------------------------------------
   const [jobs, setJobs] = useState<JenkinsJob[]>(
@@ -163,8 +177,14 @@ export const App = ({
   const [builds, setBuilds] = useState<JenkinsBuild[]>([])
   const [buildSel, setBuildSel] = useState(0)
   const [buildQuery, setBuildQuery] = useState("")
-  const [resultFilterIdx, setResultFilterIdx] = useState(0)
-  const [sortAsc, setSortAsc] = useState(false)
+  // Multi-select status filter (all shown by default); builds always newest-first.
+  const [statuses, setStatuses] = useState<Set<string>>(
+    () => new Set(BUILD_STATUSES),
+  )
+  const [statusSel, setStatusSel] = useState(0)
+  // Log order: descending = newest line at the top (default).
+  const [logDescending, setLogDescending] = useState(true)
+  logDescendingRef.current = logDescending
 
   const [logLines, setLogLines] = useState<LogLine[]>([])
   const [logScroll, setLogScroll] = useState(0)
@@ -215,23 +235,22 @@ export const App = ({
   }, [jobs, jobQuery, foldersOnly])
 
   const filteredBuilds = useMemo(() => {
-    const base = builds
-      .slice()
-      .sort((a, b) => (sortAsc ? a.number - b.number : b.number - a.number))
-    const rf = RESULT_FILTERS[resultFilterIdx]
-    const byResult = base.filter((b) => {
+    // Always newest-first; filter by the selected status set (states outside the
+    // known list are always shown so nothing silently disappears).
+    const base = builds.slice().sort((a, b) => b.number - a.number)
+    const byStatus = base.filter((b) => {
       const state = buildState(b)
-      if (rf === "FAILED") return state === "FAILURE"
-      if (rf === "SUCCESS") return state === "SUCCESS"
-      if (rf === "RUNNING") return state === "RUNNING"
-      return true
+      return (
+        !BUILD_STATUSES.includes(state as (typeof BUILD_STATUSES)[number]) ||
+        statuses.has(state)
+      )
     })
-    if (!buildQuery) return byResult
+    if (!buildQuery) return byStatus
     const q = buildQuery.toLowerCase()
-    return byResult.filter((b) =>
+    return byStatus.filter((b) =>
       `#${b.number} ${buildState(b)}`.toLowerCase().includes(q),
     )
-  }, [builds, sortAsc, resultFilterIdx, buildQuery])
+  }, [builds, statuses, buildQuery])
 
   const currentJob =
     singleJobMode && jobsFilter
@@ -269,7 +288,10 @@ export const App = ({
     }
     const cache = visualCacheRef.current.map
     const out: string[] = []
-    for (const l of logLines) {
+    // Descending = newest line at the top: iterate lines in reverse, but keep
+    // each line's own wrapped segments in reading order.
+    const ordered = logDescending ? logLines.slice().reverse() : logLines
+    for (const l of ordered) {
       let segs = cache.get(l)
       if (!segs) {
         const rendered = renderLogLine(l, {
@@ -293,6 +315,7 @@ export const App = ({
     wrap,
     logContentWidth,
     logGutter,
+    logDescending,
   ])
 
   const maxLogScroll = Math.max(0, visualLog.length - logRows)
@@ -388,10 +411,10 @@ export const App = ({
     let cancelled = false
     const building = selectedBuild?.building === true
 
-    const applyRaw = (bottom: boolean) => {
+    const applyRaw = (toLatest: boolean) => {
       const lines = processLog(rawRef.current)
       setLogLines(lines)
-      if (bottom) setLogScroll(Math.max(0, lines.length - logRowsRef.current))
+      if (toLatest) setLogScroll(scrollToLatest(lines.length))
     }
 
     const runFollow = async () => {
@@ -409,9 +432,7 @@ export const App = ({
             appendState = state
             if (lines.length) {
               setLogLines((prev) => [...prev, ...lines])
-              setLogScroll(
-                Math.max(0, appendState.nextNumber - 1 - logRowsRef.current),
-              )
+              setLogScroll(scrollToLatest(appendState.nextNumber - 1))
             }
           },
           2000,
@@ -451,7 +472,7 @@ export const App = ({
         rawRef.current = text
         const lines = processLog(text)
         setLogLines(lines)
-        setLogScroll(Math.max(0, lines.length - logRowsRef.current))
+        setLogScroll(scrollToLatest(lines.length))
         const errors = lines.filter(
           (l) => l.level === "ERROR" || l.level === "FATAL",
         ).length
@@ -597,7 +618,7 @@ export const App = ({
     setLogSearchApplied("")
     setLogMatches([])
     setLogMatchIdx(-1)
-    setResultFilterIdx(0)
+    setStatuses(new Set(BUILD_STATUSES))
     setFoldersOnly(false)
     setStatus("Filters cleared")
   }
@@ -738,6 +759,24 @@ export const App = ({
         runAction(actionItems[actionSel])
       return
     }
+    if (overlay === "statusFilter") {
+      if (key.escape || key.return || input === "q" || input === "F")
+        setOverlay(null)
+      else if (key.upArrow || input === "k")
+        setStatusSel((s) => clamp(s - 1, 0, BUILD_STATUSES.length - 1))
+      else if (key.downArrow || input === "j")
+        setStatusSel((s) => clamp(s + 1, 0, BUILD_STATUSES.length - 1))
+      else if (input === " ") {
+        const st = BUILD_STATUSES[statusSel]
+        setStatuses((prev) => {
+          const next = new Set(prev)
+          next.has(st) ? next.delete(st) : next.add(st)
+          return next
+        })
+      } else if (input === "a") setStatuses(new Set(BUILD_STATUSES))
+      else if (input === "n") setStatuses(new Set())
+      return
+    }
 
     // ---- confirmation gate (build actions) ----
     if (confirm) {
@@ -795,7 +834,12 @@ export const App = ({
       return
     }
     if (input === "S") {
-      setSortAsc((v) => !v)
+      // Flip log order (newest-at-top ↔ oldest-at-top) and jump to the top.
+      setLogDescending((v) => !v)
+      setLogScroll(0)
+      setStatus(
+        `Log order: ${!logDescending ? "newest first" : "oldest first"}`,
+      )
       return
     }
     if (input === "t") {
@@ -815,7 +859,8 @@ export const App = ({
       return
     }
     if (input === "F") {
-      setResultFilterIdx((i) => (i + 1) % RESULT_FILTERS.length)
+      setStatusSel(0)
+      setOverlay("statusFilter")
       return
     }
     if (input === "o" && !singleJobMode) {
@@ -946,15 +991,21 @@ export const App = ({
     }
     const badge = chalk.bold.bgGreen.black(` ${focus.toUpperCase()} `)
     const left = `${badge}  ${status}`
-    const rf = RESULT_FILTERS[resultFilterIdx]
-    // State chips: dim label + on/off value, so they read as *state*, not keys.
+    // State chips: dim label + value, so they read as *state*, not keys.
     const chip = (label: string, on: boolean, onText = "on", offText = "off") =>
       `${chalk.gray(label)} ${on ? chalk.green(onText) : chalk.dim(offText)}`
+    const allStatuses = statuses.size === BUILD_STATUSES.length
+    const statusVal =
+      statuses.size === 0
+        ? chalk.red("none")
+        : allStatuses
+          ? chalk.dim("all")
+          : chalk.cyan(`${statuses.size}/${BUILD_STATUSES.length}`)
     const chips = [
       chip("follow", follow),
       chip("wrap", wrap),
-      `${chalk.gray("filter")} ${rf === "ALL" ? chalk.dim("all") : chalk.cyan(rf.toLowerCase())}`,
-      `${chalk.gray("sort")} ${chalk.dim(sortAsc ? "asc" : "desc")}`,
+      `${chalk.gray("status")} ${statusVal}`,
+      `${chalk.gray("logs")} ${chalk.dim(logDescending ? "newest↑" : "oldest↑")}`,
       autoRefresh ? chalk.green("auto") : "",
     ]
       .filter(Boolean)
@@ -1018,7 +1069,7 @@ export const App = ({
           {row(
             ["/", "search"],
             ["b/B", "build filter"],
-            ["F", "result filter"],
+            ["F", "status filter"],
             ["o", "folders"],
             ["c", "clear"],
             ["L", "job limit"],
@@ -1041,7 +1092,7 @@ export const App = ({
           {row(
             ["e/W/i", "jump err/warn/info"],
             ["n/N", "next/prev match"],
-            ["S", "sort"],
+            ["S", "log order (newest/oldest)"],
             ["t", "auto-refresh"],
           )}
         </Text>
@@ -1094,6 +1145,38 @@ export const App = ({
         ))}
         <Text> </Text>
         <Text color="gray">↑/↓ move · ↵ run · Esc close</Text>
+      </Overlay>
+    )
+  }
+  if (overlay === "statusFilter") {
+    const paint = (s: string) =>
+      s === "SUCCESS"
+        ? chalk.green(s)
+        : s === "FAILURE"
+          ? chalk.red(s)
+          : s === "UNSTABLE"
+            ? chalk.magenta(s)
+            : s === "ABORTED"
+              ? chalk.cyan(s)
+              : chalk.yellow(s)
+    return (
+      <Overlay
+        title="Show build statuses"
+        color="yellow"
+        width={cols}
+        height={rows}
+      >
+        {BUILD_STATUSES.map((s, i) => {
+          const box = statuses.has(s) ? chalk.green("[x]") : chalk.gray("[ ]")
+          const label = `${box} ${paint(s)}`
+          return (
+            <Text key={s} wrap="truncate">
+              {i === statusSel ? chalk.bold(`❯ ${label}`) : `  ${label}`}
+            </Text>
+          )
+        })}
+        <Text> </Text>
+        <Text color="gray">Space toggle · a all · n none · ↵/Esc close</Text>
       </Overlay>
     )
   }

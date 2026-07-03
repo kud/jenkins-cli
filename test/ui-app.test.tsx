@@ -125,6 +125,70 @@ test("x on a running build asks to confirm, then aborts it", async () => {
   unmount()
 })
 
+test("logs default to newest-line-first (descending)", async () => {
+  const client = {
+    baseUrl: "http://jenkins.test",
+    async listBuilds() {
+      return [
+        {
+          number: 1,
+          building: false,
+          result: "SUCCESS",
+          timestamp: Date.now(),
+          duration: 1,
+        },
+      ]
+    },
+    async getConsoleText() {
+      return "AAA oldest\nBBB middle\nCCC latest\n"
+    },
+    async getArtifacts() {
+      return { build: {}, artifacts: [] }
+    },
+    async streamConsole() {},
+  } as unknown as JenkinsClient
+  const { lastFrame, unmount } = render(
+    <App
+      client={client}
+      jobSearchLimit={0}
+      buildsLimit={10}
+      preselectJob="demo"
+      jobsFilter={["demo"]}
+      singleJobMode={true}
+    />,
+  )
+  await wait(150)
+  const frame = lastFrame() ?? ""
+  // latest line (CCC) must appear above the oldest (AAA)
+  assert.ok(
+    frame.indexOf("CCC") < frame.indexOf("AAA"),
+    "newest line should be above oldest",
+  )
+  unmount()
+})
+
+test("F opens the multi-select status filter modal", async () => {
+  const { lastFrame, stdin, unmount } = render(
+    <App
+      client={stubClient()}
+      jobSearchLimit={0}
+      buildsLimit={10}
+      preselectJob="demo"
+      jobsFilter={["demo"]}
+      singleJobMode={true}
+    />,
+  )
+  await wait(120)
+  stdin.write("F")
+  await wait(40)
+  const frame = lastFrame() ?? ""
+  assert.match(frame, /Show build statuses/)
+  assert.match(frame, /SUCCESS/)
+  assert.match(frame, /FAILURE/)
+  assert.match(frame, /\[x\]/) // checkboxes rendered (all on by default)
+  unmount()
+})
+
 test("? opens the help modal listing keyboard shortcuts", async () => {
   const { lastFrame, stdin, unmount } = render(
     <App
