@@ -125,6 +125,26 @@ test("x on a running build asks to confirm, then aborts it", async () => {
   unmount()
 })
 
+test("? opens the help modal listing keyboard shortcuts", async () => {
+  const { lastFrame, stdin, unmount } = render(
+    <App
+      client={stubClient()}
+      jobSearchLimit={0}
+      buildsLimit={10}
+      preselectJob="demo"
+      jobsFilter={["demo"]}
+      singleJobMode={true}
+    />,
+  )
+  await wait(120)
+  stdin.write("?")
+  await wait(40)
+  const frame = lastFrame() ?? ""
+  assert.match(frame, /Keyboard shortcuts/)
+  assert.match(frame, /action menu/)
+  unmount()
+})
+
 test("Enter opens the action menu; selecting Abort routes to the confirm gate", async () => {
   const runningClient = {
     baseUrl: "http://jenkins.test",

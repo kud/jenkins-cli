@@ -947,59 +947,112 @@ export const App = ({
     const badge = chalk.bold.bgGreen.black(` ${focus.toUpperCase()} `)
     const left = `${badge}  ${status}`
     const rf = RESULT_FILTERS[resultFilterIdx]
-    const chip = (label: string, on: boolean) =>
-      on ? chalk.bold.green(label) : chalk.gray(label)
+    // State chips: dim label + on/off value, so they read as *state*, not keys.
+    const chip = (label: string, on: boolean, onText = "on", offText = "off") =>
+      `${chalk.gray(label)} ${on ? chalk.green(onText) : chalk.dim(offText)}`
     const chips = [
       chip("follow", follow),
       chip("wrap", wrap),
-      rf === "ALL" ? chalk.gray("all") : chalk.bold.cyan(rf.toLowerCase()),
-      chalk.gray(sortAsc ? "↑ asc" : "↓ desc"),
-      autoRefresh ? chalk.cyan("auto") : "",
+      `${chalk.gray("filter")} ${rf === "ALL" ? chalk.dim("all") : chalk.cyan(rf.toLowerCase())}`,
+      `${chalk.gray("sort")} ${chalk.dim(sortAsc ? "asc" : "desc")}`,
+      autoRefresh ? chalk.green("auto") : "",
     ]
       .filter(Boolean)
-      .join(chalk.gray(" · "))
-    const right = `${chips}   ${chalk.gray("↵ menu · ? help · q quit")}`
+      .join(chalk.dim("  "))
+    // Key hints: highlighted KEY + label, so it's obvious `?` reveals all keys.
+    const hint = (key: string, label: string) =>
+      `${chalk.bold.cyan(key)} ${chalk.gray(label)}`
+    const hints = [
+      hint("↵", "menu"),
+      hint("?", "keys"),
+      hint("q", "quit"),
+    ].join(chalk.dim(" · "))
+    const right = `${chips}    ${hints}`
     return { left, right }
   })()
 
   // ---- overlays ------------------------------------------------------------
   if (overlay === "help") {
+    // key = bright cyan, label = default; grouped so hotkeys are easy to scan.
+    const k = (key: string, label: string) =>
+      `${chalk.bold.cyan(key)} ${chalk.gray(label)}`
+    const row = (...pairs: Array<[string, string]>) =>
+      pairs.map(([key, label]) => k(key, label)).join(chalk.gray("   "))
     return (
-      <Box width={cols} height={rows} flexDirection="column" padding={1}>
-        <Text color="cyan" bold>
-          Jenkins TUI — Help
+      <Overlay
+        title="Keyboard shortcuts"
+        color="cyan"
+        width={cols}
+        height={rows}
+      >
+        <Text bold color="magenta">
+          Panes & navigation
+        </Text>
+        <Text>
+          {row(
+            ["←/→", "cycle panes"],
+            ["1/2/3", "jump pane"],
+            ["↑/↓", "move"],
+            ["r", "refresh"],
+            ["q", "quit"],
+          )}
         </Text>
         <Text> </Text>
-        <Text>
-          {chalk.bold("Navigation")} ←/→ or 1/2/3 switch panes · ↑/↓ or j/k move
-          · q quit · r refresh
+        <Text bold color="magenta">
+          Build actions
         </Text>
         <Text>
-          {chalk.bold("Builds")} f follow · S sort · F result filter · t
-          auto-refresh · a artifacts · w open in web
+          {row(
+            ["↵", "action menu"],
+            ["x", "abort build"],
+            ["T", "trigger build"],
+            ["a", "artifacts"],
+            ["w", "open in web"],
+          )}
+        </Text>
+        <Text> </Text>
+        <Text bold color="magenta">
+          Filter & search
         </Text>
         <Text>
-          {chalk.bold("Actions")} {chalk.bold("↵")} action menu (stop / re-run /
-          browser / artifacts) · {chalk.red("x")} abort · {chalk.green("T")}{" "}
-          trigger (both confirm y/N)
+          {row(
+            ["/", "search"],
+            ["b/B", "build filter"],
+            ["F", "result filter"],
+            ["o", "folders"],
+            ["c", "clear"],
+            ["L", "job limit"],
+          )}
+        </Text>
+        <Text> </Text>
+        <Text bold color="magenta">
+          Logs
         </Text>
         <Text>
-          {chalk.bold("Search")} / search (jobs or logs) · b build filter · B
-          build search · o folders-only · c clear · L job limit
+          {row(
+            ["f", "follow"],
+            ["w", "wrap"],
+            ["l", "line #s"],
+            ["g/G", "top/bottom"],
+            ["m/M", "bookmark"],
+          )}
         </Text>
         <Text>
-          {chalk.bold("Logs")} g/G top/bottom · l line numbers · w word wrap ·
-          m/M bookmark · e/W/i jump error/warn/info · n/N next/prev match
+          {row(
+            ["e/W/i", "jump err/warn/info"],
+            ["n/N", "next/prev match"],
+            ["S", "sort"],
+            ["t", "auto-refresh"],
+          )}
         </Text>
         <Text> </Text>
         <Text color="gray">
-          Legend: {chalk.yellow("RUNNING")} {chalk.green("SUCCESS")}{" "}
+          {chalk.yellow("RUNNING")} {chalk.green("SUCCESS")}{" "}
           {chalk.red("FAILURE")} {chalk.magenta("UNSTABLE")}{" "}
           {chalk.cyan("ABORTED")}
+          {chalk.gray("      ? or Esc to close")}
         </Text>
-        <Text> </Text>
-        <Text color="gray">Press ? or Esc to close</Text>
-      </Box>
+      </Overlay>
     )
   }
   if (overlay === "artifacts") {

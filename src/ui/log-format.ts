@@ -1,6 +1,6 @@
 import chalk from "chalk"
 import wrapAnsi from "wrap-ansi"
-import { formatLogsChunk } from "../format.js"
+import { formatLogsChunk, stripIcons } from "../format.js"
 
 // Framework-agnostic log processing shared by the Ink UI.
 // Kept free of React/Ink so it can be unit-tested in isolation.
@@ -88,12 +88,15 @@ export interface RenderLineOpts {
 // Produce the final chalk-formatted string for one visible log line, including
 // the optional line-number gutter and bookmark marker.
 export const renderLogLine = (line: LogLine, opts: RenderLineOpts): string => {
-  const body = opts.searchQuery
-    ? highlightMatches(line.raw, opts.searchQuery)
-    : formatLogsChunk(line.raw)
+  // stripIcons keeps every char single-width so the pane border stays aligned.
+  const body = stripIcons(
+    opts.searchQuery
+      ? highlightMatches(line.raw, opts.searchQuery)
+      : formatLogsChunk(line.raw),
+  )
   if (!opts.showLineNumbers) return body || " "
   const num = chalk.gray(String(line.number).padStart(4, " "))
-  const mark = opts.bookmarked ? "📌" : "  "
+  const mark = opts.bookmarked ? chalk.yellow("◆ ") : "  " // single-width marker
   return `${num}${mark} ${body}`
 }
 

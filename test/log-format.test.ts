@@ -16,6 +16,7 @@ const {
   toVisualLines,
   appendToLog,
   emptyLogAppendState,
+  renderLogLine,
 } = await import("../src/ui/log-format.js")
 
 test("cleanLogContent strips ANSI and control chars, normalises newlines", () => {
@@ -71,6 +72,13 @@ test("appendToLog incrementally reconstructs the same lines as a full processLog
     acc.map((l) => ({ number: l.number, raw: l.raw, level: l.level })),
     expected.map((l) => ({ number: l.number, raw: l.raw, level: l.level })),
   )
+})
+
+test("renderLogLine strips decorative emoji so every char is single-width", () => {
+  const line = processLog('Stage "x" skipped due to earlier failure')[0]
+  const out = renderLogLine(line, { showLineNumbers: true, bookmarked: false })
+  // no Extended_Pictographic / variation-selector chars survive (they float borders)
+  assert.doesNotMatch(out, /[\p{Extended_Pictographic}\uFE0F]/u)
 })
 
 test("toVisualLines wraps long lines to width and leaves short lines intact", () => {
