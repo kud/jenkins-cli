@@ -29,6 +29,25 @@ export interface JenkinsBuild {
   artifacts?: JenkinsArtifact[]
   [k: string]: any
 }
+export interface JenkinsParameterDefinition {
+  name: string
+  type?: string
+  description?: string
+  defaultValue?: unknown
+  choices?: string[]
+}
+export interface JenkinsCommit {
+  id?: string
+  author?: string
+  msg?: string
+  date?: string
+}
+export interface JenkinsBuildChanges {
+  number: number
+  causes: string[]
+  culprits: string[]
+  commits: JenkinsCommit[]
+}
 export interface ProgressiveLogOptions {
   signal?: AbortSignal
 }

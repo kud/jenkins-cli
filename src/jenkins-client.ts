@@ -3,6 +3,8 @@ import {
   JenkinsBuild,
   JenkinsArtifact,
   JenkinsCrumb,
+  JenkinsParameterDefinition,
+  JenkinsBuildChanges,
 } from "./types.js"
 
 const getFetch = () => globalThis.fetch as typeof fetch
@@ -314,6 +316,57 @@ export class JenkinsClient {
     return this._request<any>(
       `job/${encodeURIComponent(job)}/${buildNumber}/wfapi/describe`,
     )
+  }
+
+  // Build parameter definitions — so a caller knows what to pass to `build --param`.
+  async getJobParameters(job: string): Promise<JenkinsParameterDefinition[]> {
+    const data = await this._request<any>(
+      `job/${encodeURIComponent(job)}/api/json?tree=property[parameterDefinitions[name,type,description,choices,defaultParameterValue[value]]]`,
+    )
+    const defs = (data?.property || []).flatMap(
+      (p: any) => p.parameterDefinitions || [],
+    )
+    return defs.map((d: any) => ({
+      name: d.name,
+      type: d.type,
+      description: d.description || undefined,
+      defaultValue: d.defaultParameterValue?.value,
+      choices: d.choices || undefined,
+    }))
+  }
+
+  // Trigger cause, culprits, and SCM commits for a build — the core triage info.
+  async getBuildChanges(
+    job: string,
+    buildNumber?: number,
+  ): Promise<JenkinsBuildChanges> {
+    if (!buildNumber) {
+      const jobInfo = await this.getJob(job)
+      const number = jobInfo.lastBuild?.number
+      if (!number) throw new Error("No lastBuild found")
+      buildNumber = number
+    }
+    const tree =
+      "number,actions[causes[shortDescription]],changeSets[items[commitId,msg,date,author[fullName]]],culprits[fullName]"
+    const data = await this._request<any>(
+      `job/${encodeURIComponent(job)}/${buildNumber}/api/json?tree=${tree}`,
+    )
+    const causes = (data.actions || [])
+      .flatMap((a: any) => a.causes || [])
+      .map((c: any) => c.shortDescription)
+      .filter(Boolean)
+    const culprits = (data.culprits || [])
+      .map((c: any) => c.fullName)
+      .filter(Boolean)
+    const commits = (data.changeSets || [])
+      .flatMap((cs: any) => cs.items || [])
+      .map((it: any) => ({
+        id: it.commitId,
+        author: it.author?.fullName,
+        msg: it.msg,
+        date: it.date,
+      }))
+    return { number: data.number ?? buildNumber, causes, culprits, commits }
   }
 
   async listBuilds(job: string, limit = 10): Promise<JenkinsBuild[]> {

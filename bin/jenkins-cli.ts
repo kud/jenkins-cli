@@ -498,6 +498,70 @@ program
   })
 
 program
+  .command("params <job>")
+  .description(
+    "List a job's build parameter definitions (name, type, default, choices)",
+  )
+  .action(async (job) => {
+    try {
+      const client = await getClient()
+      const defs = await client.getJobParameters(job)
+      if (program.opts().json) {
+        console.log(JSON.stringify(defs, null, 2))
+      } else if (!defs.length) {
+        console.log("No parameters (this job takes no build parameters).")
+      } else {
+        defs.forEach((d) => {
+          const choices = d.choices?.length ? ` [${d.choices.join("|")}]` : ""
+          const def =
+            d.defaultValue !== undefined && d.defaultValue !== null
+              ? ` (default: ${d.defaultValue})`
+              : ""
+          const desc = d.description ? `  - ${d.description}` : ""
+          console.log(`${d.name}\t${d.type || "?"}${choices}${def}${desc}`)
+        })
+      }
+    } catch (e) {
+      formatError(e)
+      process.exit(1)
+    }
+  })
+
+program
+  .command("changes <job> [buildNumber]")
+  .description("Show what triggered a build and which commits it contains")
+  .action(async (job, buildNumber) => {
+    try {
+      const client = await getClient()
+      const info = await client.getBuildChanges(
+        job,
+        buildNumber ? parseInt(buildNumber, 10) : undefined,
+      )
+      if (program.opts().json) {
+        console.log(JSON.stringify(info, null, 2))
+        return
+      }
+      console.log(`# Build #${info.number}`)
+      if (info.causes.length) console.log(`Cause: ${info.causes.join("; ")}`)
+      if (info.culprits.length)
+        console.log(`Culprits: ${info.culprits.join(", ")}`)
+      if (!info.commits.length) {
+        console.log("No SCM changes recorded for this build.")
+      } else {
+        console.log(`Changes (${info.commits.length}):`)
+        info.commits.forEach((c) =>
+          console.log(
+            `  ${(c.id || "").slice(0, 9).padEnd(9)}  ${c.author || "?"}  ${(c.msg || "").split("\n")[0]}`,
+          ),
+        )
+      }
+    } catch (e) {
+      formatError(e)
+      process.exit(1)
+    }
+  })
+
+program
   .command("list <jobOrUrl>")
   .description("List recent builds for a job (by name or URL)")
   .option("-l, --limit <n>", "Limit number of builds", "10")
