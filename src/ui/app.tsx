@@ -7,11 +7,14 @@ import { resolve } from "node:path"
 import type { JenkinsClient } from "../jenkins-client.js"
 import type { JenkinsArtifact, JenkinsBuild, JenkinsJob } from "../types.js"
 import {
+  appendToLog,
+  emptyLogAppendState,
   findMatchingLines,
   firstLineOfLevel,
   processLog,
   renderLogLine,
   toVisualLines,
+  type LogAppendState,
   type LogLine,
 } from "./log-format.js"
 import { LogView, Overlay, Panel, ScrollList, StatusBar } from "./components.js"
@@ -195,7 +198,6 @@ export const App = ({
   const jobLimitRef = useRef(jobSearchLimit)
   const abortRef = useRef<AbortController | null>(null)
   const rawRef = useRef("")
-  const lastRenderRef = useRef(0)
   const preselectDone = useRef(false)
 
   // ---- derived: filtered lists --------------------------------------------
@@ -248,19 +250,41 @@ export const App = ({
   }, [filteredBuilds.length, buildSel])
 
   // Visual log model: each logical line becomes one row (wrap off) or several
-  // wrapped rows (wrap on). Windowing/scroll then operates on visual rows, so
-  // maxLogScroll and every jump stay correct regardless of wrap. Memoised so it
-  // only recomputes on content/toggle changes, not on every scroll keystroke.
+  // wrapped rows (wrap on). Windowing/scroll operates on visual rows, so
+  // maxLogScroll and every jump stay correct regardless of wrap.
+  //
+  // Per-line render+wrap is cached by LogLine identity so live-follow only pays
+  // for newly-appended lines (LogLine objects are stable once created), instead
+  // of re-chalk-formatting and re-wrapping the whole buffer every tick. The
+  // cache is invalidated wholesale when a display toggle changes (rare).
   const logGutter = showLineNumbers ? 7 : 0
+  const visualCacheRef = useRef<{ key: string; map: Map<LogLine, string[]> }>({
+    key: "",
+    map: new Map(),
+  })
   const visualLog = useMemo(() => {
-    const rendered = logLines.map((l) =>
-      renderLogLine(l, {
-        showLineNumbers,
-        bookmarked: bookmarks.includes(l.number - 1),
-        searchQuery: logSearchApplied || null,
-      }),
-    )
-    return wrap ? toVisualLines(rendered, logContentWidth, logGutter) : rendered
+    const key = `${wrap}|${logContentWidth}|${showLineNumbers}|${logSearchApplied}|${bookmarks.join(",")}`
+    if (visualCacheRef.current.key !== key) {
+      visualCacheRef.current = { key, map: new Map() }
+    }
+    const cache = visualCacheRef.current.map
+    const out: string[] = []
+    for (const l of logLines) {
+      let segs = cache.get(l)
+      if (!segs) {
+        const rendered = renderLogLine(l, {
+          showLineNumbers,
+          bookmarked: bookmarks.includes(l.number - 1),
+          searchQuery: logSearchApplied || null,
+        })
+        segs = wrap
+          ? toVisualLines([rendered], logContentWidth, logGutter)
+          : [rendered]
+        cache.set(l, segs)
+      }
+      for (const s of segs) out.push(s)
+    }
+    return out
   }, [
     logLines,
     showLineNumbers,
@@ -372,23 +396,29 @@ export const App = ({
 
     const runFollow = async () => {
       setStatus(chalk.cyan(`Following build #${selectedBuildNumber}…`))
+      let appendState: LogAppendState = emptyLogAppendState()
       try {
         await client.streamConsole(
           currentJob,
           selectedBuildNumber,
           (chunk) => {
-            rawRef.current += chunk
-            const now = Date.now()
-            if (now - lastRenderRef.current > 150) {
-              lastRenderRef.current = now
-              applyRaw(true)
+            rawRef.current += chunk // kept for the final reconcile + log search
+            // Process only the new chunk, append its complete lines — O(chunk),
+            // not O(whole buffer), so following a long build stays linear.
+            const { lines, state } = appendToLog(chunk, appendState)
+            appendState = state
+            if (lines.length) {
+              setLogLines((prev) => [...prev, ...lines])
+              setLogScroll(
+                Math.max(0, appendState.nextNumber - 1 - logRowsRef.current),
+              )
             }
           },
           2000,
           { signal: ac.signal },
         )
         if (!ac.signal.aborted) {
-          applyRaw(true)
+          applyRaw(true) // final reconcile: flush the pending partial line & normalise
           setStatus(chalk.green(`Build #${selectedBuildNumber} complete`))
         }
       } catch (e) {

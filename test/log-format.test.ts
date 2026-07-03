@@ -14,6 +14,8 @@ const {
   firstLineOfLevel,
   highlightMatches,
   toVisualLines,
+  appendToLog,
+  emptyLogAppendState,
 } = await import("../src/ui/log-format.js")
 
 test("cleanLogContent strips ANSI and control chars, normalises newlines", () => {
@@ -46,6 +48,29 @@ test("firstLineOfLevel finds ERROR (incl. FATAL) and wraps around", () => {
   // searching from after the match wraps back to it
   assert.equal(firstLineOfLevel(lines, "ERROR", 2), 1)
   assert.equal(firstLineOfLevel(lines, "WARN", 0), -1)
+})
+
+test("appendToLog incrementally reconstructs the same lines as a full processLog", () => {
+  const full = "line one\nERROR two\nthree and more\nfour"
+  // feed it in awkward chunks that split mid-line
+  const chunks = ["line o", "ne\nERR", "OR two\nthree ", "and more\nfo", "ur\n"]
+  let state = emptyLogAppendState()
+  const acc: Array<{ number: number; raw: string; level: string | null }> = []
+  for (const c of chunks) {
+    const r = appendToLog(c, state)
+    state = r.state
+    acc.push(...r.lines)
+  }
+  // full processLog for comparison; drop the trailing empty line that a final
+  // newline produces (incremental treats a terminating \n as "no line after")
+  const expected = processLog(full + "\n").filter(
+    (l: { raw: string }, i: number, arr: unknown[]) =>
+      !(i === arr.length - 1 && l.raw === ""),
+  )
+  assert.deepEqual(
+    acc.map((l) => ({ number: l.number, raw: l.raw, level: l.level })),
+    expected.map((l) => ({ number: l.number, raw: l.raw, level: l.level })),
+  )
 })
 
 test("toVisualLines wraps long lines to width and leaves short lines intact", () => {

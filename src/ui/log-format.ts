@@ -97,6 +97,42 @@ export const renderLogLine = (line: LogLine, opts: RenderLineOpts): string => {
   return `${num}${mark} ${body}`
 }
 
+// Incremental processing for live-follow: process only the newly-arrived chunk
+// instead of re-cleaning the whole accumulated buffer every tick (which is
+// O(n²) over a long build). Carries a `pending` partial line across chunks
+// (progressiveText can split mid-line) and a running line counter.
+export interface LogAppendState {
+  pending: string
+  nextNumber: number
+}
+
+export const emptyLogAppendState = (): LogAppendState => ({
+  pending: "",
+  nextNumber: 1,
+})
+
+export const appendToLog = (
+  chunk: string,
+  state: LogAppendState,
+): { lines: LogLine[]; state: LogAppendState } => {
+  const combined = state.pending + chunk
+  const lastNl = combined.lastIndexOf("\n")
+  // No complete line yet — hold everything as pending (kept RAW so a trailing
+  // space isn't trimmed away before the next chunk continues the line).
+  if (lastNl === -1)
+    return {
+      lines: [],
+      state: { pending: combined, nextNumber: state.nextNumber },
+    }
+  const completePart = combined.slice(0, lastNl) // everything before the last newline
+  const pending = combined.slice(lastNl + 1) // raw remainder, still incomplete
+  let n = state.nextNumber
+  const lines = cleanLogContent(completePart)
+    .split("\n")
+    .map((raw) => ({ number: n++, raw, level: extractLogLevel(raw) }))
+  return { lines, state: { pending, nextNumber: n } }
+}
+
 // Wrap already-rendered (ANSI-coloured) lines to `width`, flattening each into
 // one or more visual rows. wrap-ansi keeps colour codes intact across the break.
 // Continuation rows are indented to align under the gutter when line numbers show.
