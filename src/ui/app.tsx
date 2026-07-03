@@ -14,7 +14,7 @@ import {
   toVisualLines,
   type LogLine,
 } from "./log-format.js"
-import { LogView, Panel, ScrollList, StatusBar } from "./components.js"
+import { LogView, Overlay, Panel, ScrollList, StatusBar } from "./components.js"
 
 export interface AppProps {
   client: JenkinsClient
@@ -33,7 +33,13 @@ type Mode =
   | "buildSearch"
   | "logSearch"
   | "jobLimit"
-type OverlayKind = null | "help" | "artifacts"
+type OverlayKind = null | "help" | "artifacts" | "actions"
+
+interface ActionItem {
+  key: "abort" | "trigger" | "web" | "artifacts"
+  label: string
+  hint: string
+}
 
 const RESULT_FILTERS = ["ALL", "RUNNING", "FAILED", "SUCCESS"] as const
 const AUTO_REFRESH_MS = 10000
@@ -178,6 +184,7 @@ export const App = ({
   const [overlay, setOverlay] = useState<OverlayKind>(null)
   const [artifacts, setArtifacts] = useState<JenkinsArtifact[]>([])
   const [artifactSel, setArtifactSel] = useState(0)
+  const [actionSel, setActionSel] = useState(0)
   const [status, setStatus] = useState("Initializing…")
   const [confirm, setConfirm] = useState<{
     action: "stop" | "trigger"
@@ -593,6 +600,48 @@ export const App = ({
     setDraft("")
   }
 
+  // Actions available from the Enter menu, contextual to the selected build.
+  const actionItems: ActionItem[] = [
+    ...(selectedBuild?.building
+      ? [
+          {
+            key: "abort" as const,
+            label: "Abort running build",
+            hint: `stop #${selectedBuild.number}`,
+          },
+        ]
+      : []),
+    {
+      key: "trigger",
+      label: "Trigger new build",
+      hint: `re-run ${currentJob ?? "job"}`,
+    },
+    {
+      key: "web",
+      label: "Open in browser",
+      hint: selectedBuild ? `build #${selectedBuild.number}` : "job page",
+    },
+    { key: "artifacts", label: "View artifacts", hint: "list & download" },
+  ]
+
+  const openActions = () => {
+    if (!currentJob) {
+      setStatus("No job selected")
+      return
+    }
+    setActionSel(0)
+    setOverlay("actions")
+  }
+
+  const runAction = (item: ActionItem) => {
+    setOverlay(null)
+    if (item.key === "abort" && selectedBuild)
+      setConfirm({ action: "stop", n: selectedBuild.number })
+    else if (item.key === "trigger") setConfirm({ action: "trigger" })
+    else if (item.key === "web") openWeb()
+    else if (item.key === "artifacts") void openArtifacts()
+  }
+
   // Execute a gated build action (abort a running build / trigger a new run).
   // Jenkins exposes a single "abort" — stop/kill/cancel all resolve to stopBuild.
   const runConfirmed = async () => {
@@ -645,6 +694,20 @@ export const App = ({
       else if (key.return) void downloadArtifact()
       return
     }
+    if (overlay === "actions") {
+      if (key.escape || input === "q") setOverlay(null)
+      else if (key.upArrow || input === "k")
+        setActionSel((s) =>
+          clamp(s - 1, 0, Math.max(0, actionItems.length - 1)),
+        )
+      else if (key.downArrow || input === "j")
+        setActionSel((s) =>
+          clamp(s + 1, 0, Math.max(0, actionItems.length - 1)),
+        )
+      else if (key.return && actionItems[actionSel])
+        runAction(actionItems[actionSel])
+      return
+    }
 
     // ---- confirmation gate (build actions) ----
     if (confirm) {
@@ -666,7 +729,13 @@ export const App = ({
       return
     }
 
-    // ---- build actions (gated) ----
+    // ---- build actions ----
+    // Enter opens the contextual action menu (unless a pane needs Enter itself).
+    if (key.return && focus !== "logs") {
+      openActions()
+      return
+    }
+    // Direct shortcuts (also available from the menu):
     if (input === "x") {
       if (selectedBuild?.building)
         setConfirm({ action: "stop", n: selectedBuild.number })
@@ -823,13 +892,14 @@ export const App = ({
   })
   const buildItems = filteredBuilds.map(colorizeBuild)
 
-  const statusLine = (() => {
+  // Footer: context on the left, live state chips + hints right-aligned.
+  const footer = (() => {
     if (confirm) {
       const q =
         confirm.action === "stop"
           ? `Abort running build #${confirm.n}?`
           : `Trigger a new build of ${currentJob}?`
-      return `${chalk.bold.red(q)} ${chalk.gray("(y / N)")}`
+      return { left: chalk.bold.red(q), right: chalk.gray("y / N") }
     }
     if (mode) {
       const labels: Record<Exclude<Mode, null>, string> = {
@@ -839,20 +909,27 @@ export const App = ({
         logSearch: "Log search",
         jobLimit: "Job limit (0=∞)",
       }
-      return `${chalk.bold.magenta(labels[mode])}: ${draft}${chalk.inverse(" ")}  ${chalk.gray("(Enter apply · Esc cancel)")}`
+      return {
+        left: `${chalk.bold.magenta(labels[mode])}: ${draft}${chalk.inverse(" ")}`,
+        right: chalk.gray("Enter apply · Esc cancel"),
+      }
     }
+    const badge = chalk.bold.bgGreen.black(` ${focus.toUpperCase()} `)
+    const left = `${badge}  ${status}`
     const rf = RESULT_FILTERS[resultFilterIdx]
-    const parts = [
-      chalk.bold.green(`[${focus.toUpperCase()}]`),
-      status,
-      chalk.gray("·"),
-      `f:${follow ? chalk.green("ON") : "off"}`,
-      `F:${rf}`,
-      `sort:${sortAsc ? "ASC" : "DESC"}`,
+    const chip = (label: string, on: boolean) =>
+      on ? chalk.bold.green(label) : chalk.gray(label)
+    const chips = [
+      chip("follow", follow),
+      chip("wrap", wrap),
+      rf === "ALL" ? chalk.gray("all") : chalk.bold.cyan(rf.toLowerCase()),
+      chalk.gray(sortAsc ? "↑ asc" : "↓ desc"),
       autoRefresh ? chalk.cyan("auto") : "",
-      chalk.gray("? help · q quit"),
-    ].filter(Boolean)
-    return parts.join("  ")
+    ]
+      .filter(Boolean)
+      .join(chalk.gray(" · "))
+    const right = `${chips}   ${chalk.gray("↵ menu · ? help · q quit")}`
+    return { left, right }
   })()
 
   // ---- overlays ------------------------------------------------------------
@@ -872,8 +949,9 @@ export const App = ({
           auto-refresh · a artifacts · w open in web
         </Text>
         <Text>
-          {chalk.bold("Actions")} {chalk.red("x")} abort running build ·{" "}
-          {chalk.green("T")} trigger new build (both confirm y/N)
+          {chalk.bold("Actions")} {chalk.bold("↵")} action menu (stop / re-run /
+          browser / artifacts) · {chalk.red("x")} abort · {chalk.green("T")}{" "}
+          trigger (both confirm y/N)
         </Text>
         <Text>
           {chalk.bold("Search")} / search (jobs or logs) · b build filter · B
@@ -915,6 +993,25 @@ export const App = ({
         <Text> </Text>
         <Text color="gray">↑/↓ move · Enter download · a/Esc close</Text>
       </Box>
+    )
+  }
+  if (overlay === "actions") {
+    const title = `Actions — ${currentJob ?? "job"}${
+      selectedBuild
+        ? ` #${selectedBuild.number} · ${buildState(selectedBuild)}`
+        : ""
+    }`
+    return (
+      <Overlay title={title} color="magenta" width={cols} height={rows}>
+        {actionItems.map((it, i) => (
+          <Text key={it.key} wrap="truncate">
+            {i === actionSel ? chalk.inverse(` ${it.label} `) : `  ${it.label}`}
+            {chalk.gray(`  — ${it.hint}`)}
+          </Text>
+        ))}
+        <Text> </Text>
+        <Text color="gray">↑/↓ move · ↵ run · Esc close</Text>
+      </Overlay>
     )
   }
 
@@ -1015,7 +1112,7 @@ export const App = ({
           </Panel>
         </Box>
       </Box>
-      <StatusBar content={statusLine} width={cols} />
+      <StatusBar left={footer.left} right={footer.right} width={cols} />
     </Box>
   )
 }

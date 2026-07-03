@@ -112,16 +112,26 @@ export const LogView = ({
   </Box>
 )
 
-// Full-width bottom bar. Content is a pre-built chalk string.
+// Full-width bottom bar: context on the left, state chips + hints on the right.
 export const StatusBar = ({
-  content,
+  left,
+  right,
   width,
 }: {
-  content: string
+  left: string
+  right: string
   width: number
 }) => (
-  <Box width={width} borderStyle="round" borderColor="green" height={3}>
-    <Text wrap="truncate">{content}</Text>
+  <Box
+    width={width}
+    borderStyle="round"
+    borderColor="green"
+    height={3}
+    paddingX={1}
+    justifyContent="space-between"
+  >
+    <Text wrap="truncate">{left}</Text>
+    {right ? <Text wrap="truncate">{right}</Text> : null}
   </Box>
 )
 

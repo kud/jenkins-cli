@@ -125,6 +125,50 @@ test("x on a running build asks to confirm, then aborts it", async () => {
   unmount()
 })
 
+test("Enter opens the action menu; selecting Abort routes to the confirm gate", async () => {
+  const runningClient = {
+    baseUrl: "http://jenkins.test",
+    async listBuilds() {
+      return [
+        {
+          number: 9,
+          building: true,
+          result: null,
+          timestamp: Date.now(),
+          duration: 0,
+        },
+      ]
+    },
+    async getConsoleText() {
+      return "still running…\n"
+    },
+    async getArtifacts() {
+      return { build: {}, artifacts: [] }
+    },
+    async streamConsole() {},
+  } as unknown as JenkinsClient
+
+  const { lastFrame, stdin, unmount } = render(
+    <App
+      client={runningClient}
+      jobSearchLimit={0}
+      buildsLimit={10}
+      preselectJob="demo"
+      jobsFilter={["demo"]}
+      singleJobMode={true}
+    />,
+  )
+  await wait(150)
+  stdin.write("\r") // Enter → action menu
+  await wait(40)
+  assert.match(lastFrame() ?? "", /Actions —/)
+  assert.match(lastFrame() ?? "", /Abort running build/)
+  stdin.write("\r") // run first item (Abort, since build is running)
+  await wait(40)
+  assert.match(lastFrame() ?? "", /Abort running build #9\?/) // routed to confirm gate
+  unmount()
+})
+
 test("wide log lines stay within the terminal width (no overflow / hard-wrap bleed)", async () => {
   const longTail = "TAILTOKEN_WRAPS_NOT_BLEEDS"
   const longClient = {
