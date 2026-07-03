@@ -20,7 +20,12 @@ Launch it with:
 ```bash
 jenkins --interactive            # root flag form
 jenkins interactive              # explicit subcommand form
+jenkins ui my-service            # single-job view (Jobs panel hidden)
 ```
+
+The explorer is rendered with [Ink](https://github.com/vadimdemedes/ink) and runs
+in the terminal's **alternate screen buffer** — it takes over the whole screen
+while open and restores your scrollback on quit.
 
 ## ⌨️ Key Bindings (Core)
 
@@ -29,14 +34,30 @@ jenkins interactive              # explicit subcommand form
 | `q`     | Quit                             | `f`   | Toggle follow       |
 | `r`     | Refresh                          | `S`   | Toggle build sort   |
 | `1/2/3` | Focus pane                       | `t`   | Auto-refresh toggle |
-| `←/→`   | Cycle panes                      | `a`   | Artifacts popup     |
+| `←/→`   | Cycle panes                      | `a`   | Artifacts overlay   |
 | `/`     | Contextual search (jobs or logs) | `c`   | Clear filters       |
 | `b`     | Build text filter                | `B`   | Build fuzzy search  |
+| `o`     | Folders-only (jobs)              | `L`   | Set job limit       |
 | `m`     | Bookmark line                    | `M`   | Jump to bookmark    |
 | `e/W/i` | Jump ERROR/WARN/INFO             | `g/G` | Top / Bottom        |
-| `l`     | Toggle line numbers              | `?`   | Help overlay        |
+| `l`     | Toggle line numbers              | `w`   | Word wrap (in logs) |
+| `n/N`   | Next / prev search match         | `?`   | Help overlay        |
+
+## ⏹️ Build Actions
+
+Actions that change server state are **gated with a `y / N` confirm** in the status bar:
+
+| Key | Action                                                            |
+| --- | ----------------------------------------------------------------- |
+| `x` | Abort the selected **running** build (stop / kill / cancel)       |
+| `T` | Trigger a new build of the current job (re-run)                   |
+| `w` | Outside the Logs pane: open the current job/build in your browser |
+
+> Jenkins has no simple REST endpoint for _resume_ or _replay_; use `T` to
+> re-run a job from scratch.
 
 ## 🎯 Focus Tricks
 
-- Single job mode: `jenkins interactive --jobs my-service` hides the Jobs panel for more log real estate.
+- Single job mode: `jenkins ui my-service` (or `jenkins interactive --jobs my-service`) hides the Jobs panel for more log real estate.
+- Long log lines are clipped to the pane width; press `w` in the Logs pane to wrap them instead.
 - Emojis auto-replaced in plain terminals (CI, VS Code) → textual tokens.

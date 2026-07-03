@@ -76,3 +76,97 @@ test("pressing 3 focuses the Logs pane", async () => {
   assert.match(lastFrame() ?? "", /Logs ●/)
   unmount()
 })
+
+test("x on a running build asks to confirm, then aborts it", async () => {
+  const stopped: number[] = []
+  const runningClient = {
+    baseUrl: "http://jenkins.test",
+    async listBuilds() {
+      return [
+        {
+          number: 9,
+          building: true,
+          result: null,
+          timestamp: Date.now(),
+          duration: 0,
+        },
+      ]
+    },
+    async getConsoleText() {
+      return "still running…\n" // non-empty so follow does not auto-engage
+    },
+    async stopBuild(_job: string, n: number) {
+      stopped.push(n)
+      return { stopped: true }
+    },
+    async getArtifacts() {
+      return { build: {}, artifacts: [] }
+    },
+    async streamConsole() {},
+  } as unknown as JenkinsClient
+
+  const { lastFrame, stdin, unmount } = render(
+    <App
+      client={runningClient}
+      jobSearchLimit={0}
+      buildsLimit={10}
+      preselectJob="demo"
+      jobsFilter={["demo"]}
+      singleJobMode={true}
+    />,
+  )
+  await wait(150)
+  stdin.write("x") // request abort (builds pane is focused by default in single-job mode)
+  await wait(40)
+  assert.match(lastFrame() ?? "", /Abort running build #9\?/)
+  stdin.write("y") // confirm
+  await wait(60)
+  assert.deepEqual(stopped, [9])
+  unmount()
+})
+
+test("wide log lines are clipped to the pane, not wrapped into other panels", async () => {
+  const longTail = "TAILTOKEN_SHOULD_BE_CLIPPED"
+  const longClient = {
+    baseUrl: "http://jenkins.test",
+    async listBuilds() {
+      return [
+        {
+          number: 1,
+          building: false,
+          result: "SUCCESS",
+          timestamp: Date.now(),
+          duration: 1000,
+        },
+      ]
+    },
+    async getConsoleText() {
+      return `HEAD ${"x".repeat(200)} ${longTail}\n`
+    },
+    async getArtifacts() {
+      return { build: {}, artifacts: [] }
+    },
+    async streamConsole() {},
+  } as unknown as JenkinsClient
+
+  const { lastFrame, unmount } = render(
+    <App
+      client={longClient}
+      jobSearchLimit={0}
+      buildsLimit={10}
+      preselectJob="demo"
+      jobsFilter={["demo"]}
+      singleJobMode={true}
+    />,
+  )
+  await wait(150)
+  const frame = lastFrame() ?? ""
+  // the line's far tail must be truncated away (no bleed into neighbouring panels)
+  assert.doesNotMatch(frame, new RegExp(longTail))
+  // no rendered row exceeds the virtual terminal width (default 100 cols)
+  const overWide = frame
+    .split("\n")
+    .filter((row) => row.replace(/\x1b\[[0-9;]*m/g, "").length > 100)
+  assert.equal(overWide.length, 0)
+  unmount()
+})

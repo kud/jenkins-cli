@@ -11,6 +11,7 @@ import {
   firstLineOfLevel,
   processLog,
   renderLogLine,
+  toVisualLines,
   type LogLine,
 } from "./log-format.js"
 import { LogView, Panel, ScrollList, StatusBar } from "./components.js"
@@ -130,6 +131,11 @@ export const App = ({
     ? Math.max(20, Math.floor(cols * 0.3))
     : Math.max(16, Math.floor(cols * 0.2))
   const metadataHeight = 4
+  const rightWidth = Math.max(
+    20,
+    cols - (singleJobMode ? 0 : jobsWidth) - buildsWidth,
+  )
+  const logContentWidth = Math.max(10, rightWidth - 2) // inside the log panel border
   const logRows = Math.max(1, bodyHeight - metadataHeight - 3) // 2 border + 1 title
   const listRows = Math.max(1, bodyHeight - 3)
   const logRowsRef = useRef(logRows)
@@ -154,6 +160,7 @@ export const App = ({
   const [logLines, setLogLines] = useState<LogLine[]>([])
   const [logScroll, setLogScroll] = useState(0)
   const [showLineNumbers, setShowLineNumbers] = useState(true)
+  const [wrap, setWrap] = useState(false)
   const [bookmarks, setBookmarks] = useState<number[]>([]) // line indices
   const [logSearchApplied, setLogSearchApplied] = useState("")
   const [logMatches, setLogMatches] = useState<number[]>([])
@@ -168,6 +175,10 @@ export const App = ({
   const [artifacts, setArtifacts] = useState<JenkinsArtifact[]>([])
   const [artifactSel, setArtifactSel] = useState(0)
   const [status, setStatus] = useState("Initializing…")
+  const [confirm, setConfirm] = useState<{
+    action: "stop" | "trigger"
+    n?: number
+  } | null>(null)
   const [tick, setTick] = useState(0) // manual/auto refresh trigger
 
   const jobLimitRef = useRef(jobSearchLimit)
@@ -225,7 +236,31 @@ export const App = ({
     if (buildSel >= filteredBuilds.length) setBuildSel(0)
   }, [filteredBuilds.length, buildSel])
 
-  const maxLogScroll = Math.max(0, logLines.length - logRows)
+  // Visual log model: each logical line becomes one row (wrap off) or several
+  // wrapped rows (wrap on). Windowing/scroll then operates on visual rows, so
+  // maxLogScroll and every jump stay correct regardless of wrap. Memoised so it
+  // only recomputes on content/toggle changes, not on every scroll keystroke.
+  const logGutter = showLineNumbers ? 7 : 0
+  const visualLog = useMemo(() => {
+    const rendered = logLines.map((l) =>
+      renderLogLine(l, {
+        showLineNumbers,
+        bookmarked: bookmarks.includes(l.number - 1),
+        searchQuery: logSearchApplied || null,
+      }),
+    )
+    return wrap ? toVisualLines(rendered, logContentWidth, logGutter) : rendered
+  }, [
+    logLines,
+    showLineNumbers,
+    bookmarks,
+    logSearchApplied,
+    wrap,
+    logContentWidth,
+    logGutter,
+  ])
+
+  const maxLogScroll = Math.max(0, visualLog.length - logRows)
   useEffect(() => {
     setLogScroll((s) => clamp(s, 0, maxLogScroll))
   }, [maxLogScroll])
@@ -554,6 +589,33 @@ export const App = ({
     setDraft("")
   }
 
+  // Execute a gated build action (abort a running build / trigger a new run).
+  // Jenkins exposes a single "abort" — stop/kill/cancel all resolve to stopBuild.
+  const runConfirmed = async () => {
+    const c = confirm
+    setConfirm(null)
+    if (!c || !currentJob) return
+    if (c.action === "stop" && c.n != null) {
+      setStatus(chalk.yellow(`Stopping #${c.n}…`))
+      try {
+        await client.stopBuild(currentJob, c.n)
+        setStatus(chalk.green(`Aborted #${c.n}`))
+        setTick((t) => t + 1)
+      } catch (e) {
+        setStatus(chalk.red(`Stop failed: ${(e as Error).message}`))
+      }
+    } else if (c.action === "trigger") {
+      setStatus(chalk.yellow(`Triggering ${currentJob}…`))
+      try {
+        await client.triggerBuild(currentJob)
+        setStatus(chalk.green("Build queued"))
+        setTimeout(() => setTick((t) => t + 1), 1500) // give Jenkins a moment to register the build
+      } catch (e) {
+        setStatus(chalk.red(`Trigger failed: ${(e as Error).message}`))
+      }
+    }
+  }
+
   const cancelMode = () => {
     setMode(null)
     setDraft("")
@@ -580,6 +642,16 @@ export const App = ({
       return
     }
 
+    // ---- confirmation gate (build actions) ----
+    if (confirm) {
+      if (input === "y" || input === "Y") void runConfirmed()
+      else {
+        setConfirm(null)
+        setStatus("Cancelled")
+      }
+      return
+    }
+
     // ---- text entry modes ----
     if (mode) {
       if (key.escape) cancelMode()
@@ -587,6 +659,19 @@ export const App = ({
       else if (key.backspace || key.delete) setDraft((d) => d.slice(0, -1))
       else if (input && input.length === 1 && /[\w.:_\-/ ]/.test(input))
         setDraft((d) => d + input)
+      return
+    }
+
+    // ---- build actions (gated) ----
+    if (input === "x") {
+      if (selectedBuild?.building)
+        setConfirm({ action: "stop", n: selectedBuild.number })
+      else setStatus("Selected build is not running")
+      return
+    }
+    if (input === "T") {
+      if (currentJob) setConfirm({ action: "trigger" })
+      else setStatus("No job selected")
       return
     }
 
@@ -658,8 +743,12 @@ export const App = ({
       return
     }
     if (input === "w") {
-      if (focus === "logs") return // wrap toggle handled below; here 'w' = web
-      openWeb()
+      if (focus === "logs") {
+        setWrap((v) => !v)
+        setStatus(`Word wrap ${!wrap ? "ON" : "OFF"}`)
+      } else {
+        openWeb()
+      }
       return
     }
 
@@ -722,13 +811,7 @@ export const App = ({
   })
 
   // ---- render helpers ------------------------------------------------------
-  const visibleLog = logLines.slice(logScroll, logScroll + logRows).map((l) =>
-    renderLogLine(l, {
-      showLineNumbers,
-      bookmarked: bookmarks.includes(l.number - 1),
-      searchQuery: logSearchApplied || null,
-    }),
-  )
+  const visibleLog = visualLog.slice(logScroll, logScroll + logRows)
 
   const jobItems = filteredJobs.map((j) => {
     const name = j.fullName || j.name || ""
@@ -737,6 +820,13 @@ export const App = ({
   const buildItems = filteredBuilds.map(colorizeBuild)
 
   const statusLine = (() => {
+    if (confirm) {
+      const q =
+        confirm.action === "stop"
+          ? `Abort running build #${confirm.n}?`
+          : `Trigger a new build of ${currentJob}?`
+      return `${chalk.bold.red(q)} ${chalk.gray("(y / N)")}`
+    }
     if (mode) {
       const labels: Record<Exclude<Mode, null>, string> = {
         jobSearch: "Job search",
@@ -778,12 +868,16 @@ export const App = ({
           auto-refresh · a artifacts · w open in web
         </Text>
         <Text>
+          {chalk.bold("Actions")} {chalk.red("x")} abort running build ·{" "}
+          {chalk.green("T")} trigger new build (both confirm y/N)
+        </Text>
+        <Text>
           {chalk.bold("Search")} / search (jobs or logs) · b build filter · B
           build search · o folders-only · c clear · L job limit
         </Text>
         <Text>
-          {chalk.bold("Logs")} g/G top/bottom · l line numbers · m/M bookmark ·
-          e/W/i jump error/warn/info · n/N next/prev match
+          {chalk.bold("Logs")} g/G top/bottom · l line numbers · w word wrap ·
+          m/M bookmark · e/W/i jump error/warn/info · n/N next/prev match
         </Text>
         <Text> </Text>
         <Text color="gray">
@@ -868,6 +962,7 @@ export const App = ({
               items={jobItems}
               selected={jobSel}
               rows={listRows}
+              width={Math.max(1, jobsWidth - 2)}
               emptyText="Loading jobs…"
             />
           </Panel>
@@ -883,18 +978,20 @@ export const App = ({
             items={buildItems}
             selected={buildSel}
             rows={listRows}
+            width={Math.max(1, buildsWidth - 2)}
             emptyText="Select a job"
           />
         </Panel>
-        <Box flexDirection="column" flexGrow={1} height={bodyHeight}>
+        <Box flexDirection="column" width={rightWidth} height={bodyHeight}>
           <Box
             height={metadataHeight}
+            width={rightWidth}
             borderStyle="round"
             borderColor="cyan"
             flexDirection="column"
             overflow="hidden"
           >
-            <Text color="cyan" bold>
+            <Text color="cyan" bold wrap="truncate">
               Build Info
             </Text>
             {meta}
@@ -903,12 +1000,13 @@ export const App = ({
             title="Logs"
             color="magenta"
             focused={focus === "logs"}
-            flexGrow={1}
+            width={rightWidth}
+            height={Math.max(3, bodyHeight - metadataHeight)}
           >
             {logLines.length === 0 ? (
               <Text color="gray">No logs — select a build</Text>
             ) : (
-              <LogView lines={visibleLog} />
+              <LogView lines={visibleLog} width={logContentWidth} />
             )}
           </Panel>
         </Box>

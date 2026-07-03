@@ -13,6 +13,7 @@ const {
   findMatchingLines,
   firstLineOfLevel,
   highlightMatches,
+  toVisualLines,
 } = await import("../src/ui/log-format.js")
 
 test("cleanLogContent strips ANSI and control chars, normalises newlines", () => {
@@ -45,6 +46,12 @@ test("firstLineOfLevel finds ERROR (incl. FATAL) and wraps around", () => {
   // searching from after the match wraps back to it
   assert.equal(firstLineOfLevel(lines, "ERROR", 2), 1)
   assert.equal(firstLineOfLevel(lines, "WARN", 0), -1)
+})
+
+test("toVisualLines wraps long lines to width and leaves short lines intact", () => {
+  const visual = toVisualLines(["abcdefghij klmnopqrst"], 10, 3)
+  assert.ok(visual.length >= 2)
+  assert.deepEqual(toVisualLines(["short"], 40), ["short"])
 })
 
 test("highlightMatches wraps every occurrence and leaves misses untouched", () => {
