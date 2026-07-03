@@ -17,6 +17,7 @@ export interface JenkinsJob {
     };
     builds?: Array<JenkinsBuildRef>;
     artifacts?: JenkinsArtifact[];
+    error?: string;
 }
 export interface JenkinsArtifact {
     fileName: string;
@@ -33,7 +34,7 @@ export interface JenkinsBuild {
 export interface ProgressiveLogOptions {
     signal?: AbortSignal;
 }
-export type RequestAs = 'buffer' | undefined;
+export type RequestAs = "buffer" | undefined;
 export interface RequestOptions {
     method?: string;
     headers?: Record<string, string>;

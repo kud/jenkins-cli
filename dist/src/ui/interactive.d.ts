@@ -1,5 +1,5 @@
-import { JenkinsClient } from '../jenkins-client.js';
-interface RunInteractiveOpts {
+import type { JenkinsClient } from "../jenkins-client.js";
+export interface RunInteractiveOpts {
     jobSearchLimit?: number;
     buildsLimit?: number;
     forceBasicColor?: boolean;
@@ -7,5 +7,4 @@ interface RunInteractiveOpts {
     noTerminfo?: boolean;
     jobsFilter?: string[] | null;
 }
-export declare function runInteractive(client: JenkinsClient, { jobSearchLimit, buildsLimit, forceBasicColor, preselectJob, noTerminfo, jobsFilter }: RunInteractiveOpts): Promise<void>;
-export {};
+export declare function runInteractive(client: JenkinsClient, opts?: RunInteractiveOpts): Promise<void>;
