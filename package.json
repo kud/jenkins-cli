@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsc -p .",
     "dev": "tsx bin/jenkins-cli.ts",
-    "test": "node --test",
+    "test": "node --import tsx --test 'test/**/*.test.ts' 'test/**/*.test.tsx'",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
