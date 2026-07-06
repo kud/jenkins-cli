@@ -69,6 +69,20 @@ test("formatPipelineGraph makes a failed stage bold, not the passing ones", () =
   }
 })
 
+test("formatPipelineGraph animates only in-progress stages with runningFrame", () => {
+  const data = {
+    status: "IN_PROGRESS",
+    durationMillis: 90000,
+    stages: [
+      { name: "Checkout", status: "SUCCESS", durationMillis: 12000 },
+      { name: "Build", status: "IN_PROGRESS", durationMillis: 45000 },
+    ],
+  }
+  const out = formatPipelineGraph(data, { width: 60, runningFrame: "⠹" })
+  assert.match(out, /⠹ Build/) // running stage shows the frame
+  assert.match(out, /✓ Checkout/) // finished stage keeps its glyph
+})
+
 test("formatPipelineGraph handles a build with no stages", () => {
   const out = formatPipelineGraph(
     { status: "SUCCESS", durationMillis: 3000, stages: [] },

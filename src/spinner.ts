@@ -3,7 +3,8 @@
 // stays clean) and must vanish when output isn't an interactive terminal
 // (pipes, CI, dumb terminals). Ink is reserved for the persistent explorer.
 
-const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+const FRAMES = SPINNER_FRAMES
 
 const spinnerEnabled = (): boolean =>
   !!process.stderr.isTTY &&

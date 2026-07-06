@@ -125,7 +125,7 @@ const stageStyle = (status: string) => {
 // distinguished, so this renders the sequence in order.
 export function formatPipelineGraph(
   data,
-  { color = false, width = 80, label = "Build" } = {},
+  { color = false, width = 80, label = "Build", runningFrame = "" } = {},
 ) {
   const ascii = DISABLE_UNICODE_ICONS
   const paint = (fn, s: string) => (color ? fn(s) : s)
@@ -163,7 +163,11 @@ export function formatPipelineGraph(
   }
 
   const lines = stages.map((st, i) => {
-    const icon = styles[i].icon.padEnd(glyphW)
+    // A live watch loop passes a spinner frame; an in-progress stage animates it
+    // in place of the static ▶ glyph.
+    const running = /IN_PROGRESS|RUNNING/.test(String(st.status).toUpperCase())
+    const rawIcon = running && runningFrame ? runningFrame : styles[i].icon
+    const icon = rawIcon.padEnd(glyphW)
     // Failure is the one state worth shouting: its whole row goes bold red so a
     // single failed stage is unmissable in a wall of passing ones. Everything
     // else stays glyph-only + grey duration, keeping the list calm.

@@ -495,20 +495,36 @@ program
   .description(
     "Fetch pipeline stages (workflow-api plugin required); omit buildNumber (or pass 'latest') for the most recent build",
   )
-  .option("-g, --graph", "Render stages as a horizontal pipeline flow")
+  .option("-g, --graph", "Render stages as a vertical pipeline flow")
+  .option(
+    "-w, --watch",
+    "Live-refresh the pipeline graph until the build finishes (implies --graph)",
+  )
   .action(async (job, buildNumber, cmd) => {
     try {
       const client = await getClient()
       // Omitted or the literal "latest" => let the client resolve lastBuild.
       const ref =
         !buildNumber || buildNumber === "latest" ? undefined : buildNumber
+      const jsonFlag = program.opts().json
+
+      // Live watch: passive auto-refreshing graph. Needs a TTY to redraw in
+      // place; when piped or in --json it falls through to a single render.
+      if (cmd.watch && !jsonFlag && process.stdout.isTTY) {
+        const { watchStages } = await import("../src/stages-watch.js")
+        await watchStages(() => client.getPipelineStages(job, ref), {
+          color: useColor(),
+          label: `${job}${ref ? ` #${ref}` : ""}`,
+        })
+        return
+      }
+
       const data = await withSpinner("Fetching stages…", () =>
         client.getPipelineStages(job, ref),
       )
-      const jsonFlag = program.opts().json
       if (jsonFlag) {
         console.log(JSON.stringify(data, null, 2))
-      } else if (cmd.graph) {
+      } else if (cmd.graph || cmd.watch) {
         // Label from the resolved build: wfapi echoes its name/id, so "latest"
         // still prints the concrete build (e.g. #1360), not the word "latest".
         const build =
