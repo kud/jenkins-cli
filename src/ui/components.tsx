@@ -58,10 +58,11 @@ interface ScrollListProps {
   emptyText: string
 }
 
-// A vertically-windowed selectable list. Selection is shown via reverse video,
-// which survives chalk-coloured item strings (colour resets don't clear [7m).
-// An explicit width + overflow:hidden is what gives `truncate` a hard boundary —
-// without it Ink measures the natural (content) width and long rows bleed out.
+// A vertically-windowed selectable list. Selection is shown with a caret marker
+// — the single selection language across every list in the app (reverse video
+// washed out coloured rows and glared on plain ones). An explicit width +
+// overflow:hidden is what gives `truncate` a hard boundary — without it Ink
+// measures the natural (content) width and long rows bleed out.
 export const ScrollList = ({
   items,
   selected,
@@ -81,10 +82,9 @@ export const ScrollList = ({
     <Box flexDirection="column" width={width} overflow="hidden">
       {visible.map((it, i) => {
         const idx = start + i
-        // Both branches must use the SAME gutter width (two leading spaces) or
-        // the selected row shifts left by a column and its right edge gains a
-        // character before truncate. The inverse just recolours that gutter.
-        const line = idx === selected ? chalk.inverse(`  ${it}`) : `  ${it}`
+        // A 2-column gutter in both branches keeps every row aligned (the caret
+        // occupies the first column of the selected row; a plain space, the rest).
+        const line = idx === selected ? `${chalk.cyan("❯")} ${it}` : `  ${it}`
         return (
           <Text key={idx} wrap="truncate">
             {line}

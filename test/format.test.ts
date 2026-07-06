@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import chalk from "chalk"
-import { formatPipelineGraph } from "../src/format.js"
+import { formatPipelineGraph, formatStageRows } from "../src/format.js"
 
 const sample = {
   status: "FAILED",
@@ -81,6 +81,34 @@ test("formatPipelineGraph animates only in-progress stages with runningFrame", (
   const out = formatPipelineGraph(data, { width: 60, runningFrame: "⠹" })
   assert.match(out, /⠹ Build/) // running stage shows the frame
   assert.match(out, /✓ Checkout/) // finished stage keeps its glyph
+})
+
+test("formatStageRows renders one glyph+name+duration row per item", () => {
+  const rows = formatStageRows([
+    { name: "Checkout", status: "SUCCESS", durationMillis: 12000 },
+    { name: "Deploy", status: "FAILED", durationMillis: 8000 },
+  ])
+  assert.equal(rows.length, 2)
+  assert.match(rows[0], /✓ Checkout\s+12s/)
+  assert.match(rows[1], /✗ Deploy\s+8s/)
+})
+
+test("formatStageRows bolds only failed rows when coloured", () => {
+  const prev = chalk.level
+  chalk.level = 1
+  try {
+    const rows = formatStageRows(
+      [
+        { name: "Ok", status: "SUCCESS", durationMillis: 1000 },
+        { name: "Bad", status: "FAILURE", durationMillis: 1000 },
+      ],
+      { color: true },
+    )
+    assert.ok(rows[1].includes("[1m"), "failed row bold")
+    assert.ok(!rows[0].includes("[1m"), "passing row not bold")
+  } finally {
+    chalk.level = prev
+  }
 })
 
 test("formatPipelineGraph handles a build with no stages", () => {

@@ -185,6 +185,43 @@ export function formatPipelineGraph(
   return [header, "", ...lines].join("\n")
 }
 
+// One aligned "glyph name  duration" row per stage OR step, for a selectable
+// list (the interactive stage drill-down). Same colour hierarchy as the graph —
+// coloured glyph, neutral name, grey duration, bold red for failures. With
+// `spine`, each row gets the ┌─/├─/└─ connector so the list reads like the CLI
+// graph; selection is shown by the list's caret, not a reverse-video bar.
+export function formatStageRows(
+  items: any[],
+  { color = false, spine = false }: { color?: boolean; spine?: boolean } = {},
+): string[] {
+  const ascii = DISABLE_UNICODE_ICONS
+  const names = items.map((s) => s.name || "")
+  const durs = items.map((s) => fmtMillis(s.durationMillis))
+  const styles = items.map((s) => stageStyle(s.status))
+  const glyphW = Math.max(1, ...styles.map((s) => s.icon.length))
+  const nameCol = Math.max(0, ...names.map((n) => n.length))
+  const connector = (i: number) => {
+    if (!spine) return ""
+    if (items.length === 1) return ascii ? "-- " : "── "
+    if (i === 0) return ascii ? "+- " : "┌─ "
+    if (i === items.length - 1) return ascii ? "+- " : "└─ "
+    return ascii ? "|- " : "├─ "
+  }
+  return items.map((s, i) => {
+    const failed = /FAIL/.test(String(s.status).toUpperCase())
+    const icon = styles[i].icon.padEnd(glyphW)
+    const glyph = !color
+      ? icon
+      : failed
+        ? chalk.red.bold(icon)
+        : styles[i].paint(icon)
+    const nameCell = names[i].padEnd(nameCol)
+    const name = color && failed ? chalk.red.bold(nameCell) : nameCell
+    const dur = color && durs[i] ? chalk.gray(durs[i]) : durs[i]
+    return `${connector(i)}${glyph} ${name}  ${dur}`.trimEnd()
+  })
+}
+
 // A job with no build colour is a folder (or an empty container). Jenkins
 // leaf jobs always report a colour (blue/red/…); folders never do.
 const isFolder = (job) => job.color === undefined || job.color === null

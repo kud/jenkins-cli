@@ -18,6 +18,7 @@ import {
   type LogLine,
 } from "./log-format.js"
 import { LogView, Overlay, Panel, ScrollList, StatusBar } from "./components.js"
+import { formatStageRows } from "../format.js"
 
 export interface AppProps {
   client: JenkinsClient
@@ -36,10 +37,17 @@ type Mode =
   | "buildSearch"
   | "logSearch"
   | "jobLimit"
-type OverlayKind = null | "help" | "artifacts" | "actions" | "statusFilter"
+type OverlayKind =
+  | null
+  | "help"
+  | "artifacts"
+  | "actions"
+  | "statusFilter"
+  | "stages"
+type StageLevel = "stages" | "steps" | "log"
 
 interface ActionItem {
-  key: "abort" | "trigger" | "web" | "artifacts"
+  key: "abort" | "trigger" | "web" | "artifacts" | "stages"
   label: string
   hint: string
 }
@@ -101,6 +109,20 @@ const colorizeBuild = (b: JenkinsBuild) => {
   return paint(
     `${pad(`#${b.number}`, 7)} ${pad(state, 9)} ${pad(fmtDuration(b), 6)} ${pad(fmtAge(b), 8)}`,
   )
+}
+
+// A status dot from a job's Jenkins `color` (its last build's health): blue =
+// success, red = failure, yellow = unstable, *_anime = a build running now,
+// grey/disabled = idle, no colour = a folder.
+const jobDot = (color?: string): string => {
+  const c = (color || "").toLowerCase()
+  if (!c) return chalk.gray("▸")
+  if (c.includes("anime")) return chalk.cyan("◐")
+  if (c.startsWith("blue")) return chalk.green("●")
+  if (c.startsWith("red")) return chalk.red("●")
+  if (c.startsWith("yellow")) return chalk.yellow("●")
+  if (c.startsWith("aborted")) return chalk.gray("●")
+  return chalk.gray("○")
 }
 
 const useTermSize = () => {
@@ -208,6 +230,14 @@ export const App = ({
   const [artifacts, setArtifacts] = useState<JenkinsArtifact[]>([])
   const [artifactSel, setArtifactSel] = useState(0)
   const [actionSel, setActionSel] = useState(0)
+  // Stage drill-down overlay: one overlay, three levels (stages → steps → log).
+  const [pipelineStages, setPipelineStages] = useState<any>(null)
+  const [stageSel, setStageSel] = useState(0)
+  const [stageLevel, setStageLevel] = useState<StageLevel>("stages")
+  const [stageSteps, setStageSteps] = useState<any[]>([])
+  const [stepSel, setStepSel] = useState(0)
+  const [stepLog, setStepLog] = useState("")
+  const [stepLogScroll, setStepLogScroll] = useState(0)
   const [status, setStatus] = useState("Initializing…")
   const [confirm, setConfirm] = useState<{
     action: "stop" | "trigger"
@@ -594,6 +624,62 @@ export const App = ({
     }
   }
 
+  // Stage drill-down loaders. Fetch on demand (on Enter), not on selection, so
+  // arrowing through stages/steps doesn't hammer the API — mirrors openArtifacts.
+  const openStages = async () => {
+    if (!currentJob || selectedBuildNumber == null) {
+      setStatus("No build selected")
+      return
+    }
+    setStatus("Loading stages…")
+    try {
+      const data = await client.getPipelineStages(
+        currentJob,
+        selectedBuildNumber,
+      )
+      setPipelineStages(data)
+      setStageSel(0)
+      setStageLevel("stages")
+      setOverlay("stages")
+    } catch (e) {
+      setStatus(chalk.red(`Stages error: ${(e as Error).message}`))
+    }
+  }
+
+  const openSteps = async (stage: any) => {
+    if (!currentJob || selectedBuildNumber == null || !stage?.id) return
+    setStatus(`Loading steps for ${stage.name}…`)
+    try {
+      const data = await client.getStageSteps(
+        currentJob,
+        selectedBuildNumber,
+        stage.id,
+      )
+      setStageSteps(data?.stageFlowNodes ?? [])
+      setStepSel(0)
+      setStageLevel("steps")
+    } catch (e) {
+      setStatus(chalk.red(`Steps error: ${(e as Error).message}`))
+    }
+  }
+
+  const openStepLog = async (step: any) => {
+    if (!currentJob || selectedBuildNumber == null || !step?.id) return
+    setStatus(`Loading log for ${step.name}…`)
+    try {
+      const text = await client.getStepLog(
+        currentJob,
+        selectedBuildNumber,
+        step.id,
+      )
+      setStepLog(text || "(no log for this step)")
+      setStepLogScroll(0)
+      setStageLevel("log")
+    } catch (e) {
+      setStatus(chalk.red(`Step log error: ${(e as Error).message}`))
+    }
+  }
+
   const downloadArtifact = async () => {
     const art = artifacts[artifactSel]
     if (!art || !currentJob || !selectedBuild) return
@@ -672,6 +758,15 @@ export const App = ({
       label: "Open in browser",
       hint: selectedBuild ? `build #${selectedBuild.number}` : "job page",
     },
+    ...(selectedBuild
+      ? [
+          {
+            key: "stages" as const,
+            label: "View pipeline stages",
+            hint: `stages & step logs`,
+          },
+        ]
+      : []),
     { key: "artifacts", label: "View artifacts", hint: "list & download" },
   ]
 
@@ -691,6 +786,7 @@ export const App = ({
     else if (item.key === "trigger") setConfirm({ action: "trigger" })
     else if (item.key === "web") openWeb()
     else if (item.key === "artifacts") void openArtifacts()
+    else if (item.key === "stages") void openStages()
   }
 
   // Execute a gated build action (abort a running build / trigger a new run).
@@ -777,6 +873,41 @@ export const App = ({
       else if (input === "n") setStatuses(new Set())
       return
     }
+    if (overlay === "stages") {
+      const stages = pipelineStages?.stages ?? []
+      if (stageLevel === "stages") {
+        if (key.escape || input === "q") setOverlay(null)
+        else if (key.upArrow || input === "k")
+          setStageSel((s) => clamp(s - 1, 0, Math.max(0, stages.length - 1)))
+        else if (key.downArrow || input === "j")
+          setStageSel((s) => clamp(s + 1, 0, Math.max(0, stages.length - 1)))
+        else if (key.return && stages[stageSel])
+          void openSteps(stages[stageSel])
+      } else if (stageLevel === "steps") {
+        if (key.escape) setStageLevel("stages")
+        else if (input === "q") setOverlay(null)
+        else if (key.upArrow || input === "k")
+          setStepSel((s) => clamp(s - 1, 0, Math.max(0, stageSteps.length - 1)))
+        else if (key.downArrow || input === "j")
+          setStepSel((s) => clamp(s + 1, 0, Math.max(0, stageSteps.length - 1)))
+        else if (key.return && stageSteps[stepSel])
+          void openStepLog(stageSteps[stepSel])
+      } else {
+        // log level
+        const maxScroll = Math.max(0, stepLog.split("\n").length - (rows - 6))
+        if (key.escape) setStageLevel("steps")
+        else if (input === "q") setOverlay(null)
+        else if (key.upArrow || input === "k")
+          setStepLogScroll((s) => clamp(s - 1, 0, maxScroll))
+        else if (key.downArrow || input === "j")
+          setStepLogScroll((s) => clamp(s + 1, 0, maxScroll))
+        else if (key.pageUp)
+          setStepLogScroll((s) => clamp(s - 10, 0, maxScroll))
+        else if (key.pageDown)
+          setStepLogScroll((s) => clamp(s + 10, 0, maxScroll))
+      }
+      return
+    }
 
     // ---- confirmation gate (build actions) ----
     if (confirm) {
@@ -851,6 +982,10 @@ export const App = ({
     }
     if (input === "a") {
       void openArtifacts()
+      return
+    }
+    if (input === "p") {
+      void openStages()
       return
     }
     if (input === "L") {
@@ -963,7 +1098,8 @@ export const App = ({
 
   const jobItems = filteredJobs.map((j) => {
     const name = j.fullName || j.name || ""
-    return j.error ? chalk.red(`${name} — ERROR`) : name
+    const dot = jobDot(j.color)
+    return j.error ? `${dot} ${chalk.red(`${name} — ERROR`)}` : `${dot} ${name}`
   })
   const buildItems = filteredBuilds.map(colorizeBuild)
 
@@ -1015,8 +1151,8 @@ export const App = ({
       `${chalk.bold.cyan(key)} ${chalk.gray(label)}`
     const hints = [
       hint("↵", "menu"),
+      hint("p", "stages"),
       hint("r", "refresh"),
-      hint("t", "auto"),
       hint("?", "keys"),
       hint("q", "quit"),
     ].join(chalk.dim(" · "))
@@ -1060,6 +1196,7 @@ export const App = ({
             ["x", "abort build"],
             ["T", "trigger build"],
             ["a", "artifacts"],
+            ["p", "pipeline stages"],
             ["w", "open in web"],
           )}
         </Text>
@@ -1121,7 +1258,7 @@ export const App = ({
           artifacts.slice(0, rows - 5).map((a, i) => (
             <Text key={a.relativePath} wrap="truncate">
               {i === artifactSel
-                ? chalk.inverse(` ${a.relativePath} `)
+                ? `${chalk.cyan("❯")} ${a.relativePath}`
                 : `  ${a.relativePath}`}
             </Text>
           ))
@@ -1129,6 +1266,63 @@ export const App = ({
         <Text> </Text>
         <Text color="gray">↑/↓ move · Enter download · a/Esc close</Text>
       </Box>
+    )
+  }
+  if (overlay === "stages") {
+    const stages = pipelineStages?.stages ?? []
+    const stageName = stages[stageSel]?.name ?? ""
+    const stepName = stageSteps[stepSel]?.name ?? ""
+    const crumb =
+      stageLevel === "stages"
+        ? ""
+        : stageLevel === "steps"
+          ? ` · ${stageName}`
+          : ` · ${stageName} › ${stepName}`
+    const title = `Stages — ${currentJob ?? "job"} #${selectedBuild?.number ?? "?"}${crumb}`
+    // Match the Overlay's actual content box (width capped at 100, minus its
+    // paddingX) so long log lines truncate inside the border, not past it.
+    const innerW = Math.max(10, Math.min(cols - 4, 100) - 2)
+    const innerRows = Math.max(1, rows - 6)
+    const hint =
+      stageLevel === "stages"
+        ? "↑/↓ move · ↵ steps · q/Esc close"
+        : stageLevel === "steps"
+          ? "↑/↓ move · ↵ log · Esc back · q close"
+          : "↑/↓ scroll · Esc back · q close"
+    return (
+      <Overlay title={title} color="green" width={cols} height={rows}>
+        {stageLevel === "stages" &&
+          (stages.length ? (
+            <ScrollList
+              items={formatStageRows(stages, { color: true, spine: true })}
+              selected={stageSel}
+              rows={innerRows}
+              width={innerW}
+              emptyText="No stages"
+            />
+          ) : (
+            <Text color="gray">No stages (not a pipeline build?)</Text>
+          ))}
+        {stageLevel === "steps" && (
+          <ScrollList
+            items={formatStageRows(stageSteps, { color: true, spine: true })}
+            selected={stepSel}
+            rows={innerRows}
+            width={innerW}
+            emptyText="No steps"
+          />
+        )}
+        {stageLevel === "log" && (
+          <LogView
+            lines={stepLog
+              .split("\n")
+              .slice(stepLogScroll, stepLogScroll + innerRows)}
+            width={innerW}
+          />
+        )}
+        <Text> </Text>
+        <Text color="gray">{hint}</Text>
+      </Overlay>
     )
   }
   if (overlay === "actions") {
@@ -1141,7 +1335,9 @@ export const App = ({
       <Overlay title={title} color="magenta" width={cols} height={rows}>
         {actionItems.map((it, i) => (
           <Text key={it.key} wrap="truncate">
-            {i === actionSel ? chalk.inverse(` ${it.label} `) : `  ${it.label}`}
+            {i === actionSel
+              ? `${chalk.cyan("❯")} ${it.label}`
+              : `  ${it.label}`}
             {chalk.gray(`  — ${it.hint}`)}
           </Text>
         ))}
@@ -1173,7 +1369,7 @@ export const App = ({
           const label = `${box} ${paint(s)}`
           return (
             <Text key={s} wrap="truncate">
-              {i === statusSel ? chalk.bold(`❯ ${label}`) : `  ${label}`}
+              {i === statusSel ? `${chalk.cyan("❯")} ${label}` : `  ${label}`}
             </Text>
           )
         })}

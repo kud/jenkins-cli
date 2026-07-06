@@ -765,48 +765,37 @@ program
   })
 
 program
-  .command("ui <job>")
-  .description("Interactive TUI for a job (build list + logs)")
-  .option("-l, --limit <n>", "Limit builds listed", "10")
-  .action(async (job, cmd) => {
-    try {
-      const client = await getClient()
-      const { runTUI } = await import("../src/ui/tui.js")
-      const limit = parseInt(cmd.limit, 10) || 10
-      await runTUI(client, { job, limit })
-    } catch (e) {
-      formatError(e)
-      process.exit(1)
-    }
-  })
-
-program
-  .command("interactive")
-  .description("Interactive multi-job explorer (jobs, builds, logs)")
+  .command("interactive [job]")
+  .description(
+    "Interactive explorer (jobs, builds, logs). Pass a job for a single-job view.",
+  )
   .option(
     "-j, --jobs-limit <n>",
     "Set manual job cap (default unlimited; 0 = unlimited)",
     "0",
   )
   .option("-b, --builds-limit <n>", "Max builds per job", "15")
-  .action(async (cmd) => {
+  .action(async (job, cmd) => {
     try {
       const client = await getClient()
       const { runInteractive } = await import("../src/ui/interactive.js")
       const root = program.opts()
       const jobsLimitVal = parseInt(cmd.jobsLimit, 10)
       const jobSearchLimit = isNaN(jobsLimitVal) ? 0 : jobsLimitVal // 0 => unlimited default
-      const jobsFilter = root.jobs
+      // A positional job gives the collapsed single-job view (what `ui` did);
+      // otherwise fall back to the root --jobs filter.
+      const rootJobs = root.jobs
         ? root.jobs
             .split(",")
             .map((j) => j.trim())
             .filter(Boolean)
         : null
+      const jobsFilter = job ? [job] : rootJobs
       await runInteractive(client, {
         jobSearchLimit,
         buildsLimit: parseInt(cmd.buildsLimit, 10) || 15,
         forceBasicColor: !!root.basicColors,
-        preselectJob: root.project || null,
+        preselectJob: job || root.project || null,
         noTerminfo: !!root.noTerminfo,
         jobsFilter,
       })

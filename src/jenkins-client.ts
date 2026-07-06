@@ -324,6 +324,39 @@ export class JenkinsClient {
     )
   }
 
+  // The steps inside a single pipeline stage node (from the stage `id` returned
+  // by getPipelineStages) → { stageFlowNodes: [{ id, name, status, ... }] }.
+  async getStageSteps(
+    job: string,
+    buildNumber: number | string,
+    nodeId: string,
+  ): Promise<any> {
+    return this._request<any>(
+      `job/${encodeURIComponent(job)}/${buildNumber}/execution/node/${nodeId}/wfapi/describe`,
+    )
+  }
+
+  // A single step's log text. The wfapi log endpoint wraps it in { text } and
+  // returns Jenkins' HTML-annotated console (<a href=…> links, entities), so we
+  // strip tags and decode entities down to plain text.
+  async getStepLog(
+    job: string,
+    buildNumber: number | string,
+    stepId: string,
+  ): Promise<string> {
+    const r = await this._request<any>(
+      `job/${encodeURIComponent(job)}/${buildNumber}/execution/node/${stepId}/wfapi/log`,
+    )
+    const raw = (r && r.text) || ""
+    return raw
+      .replace(/<[^>]+>/g, "")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&")
+  }
+
   // Build parameter definitions — so a caller knows what to pass to `build --param`.
   async getJobParameters(job: string): Promise<JenkinsParameterDefinition[]> {
     const data = await this._request<any>(
