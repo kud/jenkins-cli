@@ -19,12 +19,26 @@ import {
   formatBuildList,
   formatError,
   formatLogsChunk,
+  formatJobList,
+  formatJobTree,
 } from "../src/format.js"
 import {
   normalizeUrl,
   ensureScheme,
   parseBuildSpecifier,
 } from "../src/url-utils.js"
+import { withSpinner, createSpinner } from "../src/spinner.js"
+
+// Colour is on by default when stdout is an interactive terminal, and off when
+// piped, in JSON mode, when NO_COLOR is set, or via --no-color — so scripts and
+// `--json` always get clean, uncoloured output. --pretty forces it on.
+const useColor = (): boolean => {
+  const o = program.opts()
+  if (o.json) return false
+  if (o.pretty) return true
+  if (o.color === false || process.env.NO_COLOR) return false
+  return !!process.stdout.isTTY
+}
 
 // Single source of truth for the version: read package.json at runtime rather
 // than hardcoding a string that silently drifts on every release bump.
@@ -53,7 +67,8 @@ program
   .option("--user <user>", "Jenkins username")
   .option("--token <token>", "Jenkins API token")
   .option("--json", "Raw JSON output", false)
-  .option("--pretty", "Colorised output", false)
+  .option("--pretty", "Force colorised output (on by default in a TTY)", false)
+  .option("--no-color", "Disable coloured output")
   .option("--server <name>", "Select configured server alias")
   .option(
     "--timeout <ms>",
@@ -270,12 +285,13 @@ program
         )
       }
       const jsonFlag = program.opts().json
-      const pretty = program.opts().pretty
-      const build = await client.getBuild(job, num)
+      const build = await withSpinner("Fetching status…", () =>
+        client.getBuild(job, num),
+      )
       if (jsonFlag) {
         console.log(JSON.stringify(build, null, 2))
       } else {
-        console.log(formatStatus(build, { pretty }))
+        console.log(formatStatus(build, { pretty: useColor() }))
       }
     } catch (e) {
       formatError(e)
@@ -562,21 +578,67 @@ program
   })
 
 program
-  .command("list <jobOrUrl>")
-  .description("List recent builds for a job (by name or URL)")
-  .option("-l, --limit <n>", "Limit number of builds", "10")
+  .command("list [jobOrUrl]")
+  .description(
+    "List top-level jobs (no argument; --all to recurse into folders), or recent builds for a job (by name or URL)",
+  )
+  .option("-l, --limit <n>", "Limit results")
+  .option(
+    "-a, --all",
+    "Recurse into folders and list every job (concurrent crawl)",
+  )
+  .option("--flat", "With --all, force a flat list instead of a tree")
   .action(async (jobOrUrl, cmd) => {
     try {
-      const spec = parseBuildSpecifier(jobOrUrl)
       const client = await getClient()
       const jsonFlag = program.opts().json
-      const pretty = program.opts().pretty
-      const limit = parseInt(cmd.limit, 10) || 10
-      const builds = await client.listBuilds(spec.job, limit)
+      // No target => list jobs. Default is top-level only (one request); --all
+      // walks the whole tree. With a target => builds for that job (default
+      // 10), preserving the original single-job behaviour.
+      if (!jobOrUrl) {
+        const limit = cmd.limit ? parseInt(cmd.limit, 10) : 0
+        let jobs
+        if (cmd.all) {
+          const spinner = createSpinner("Crawling jobs…")
+          try {
+            jobs = await client.searchJobsIncremental("", {
+              limit,
+              onBatch: (_j, s) =>
+                spinner.setText(
+                  `Crawling jobs… ${s.total} found (${s.queued} folders queued)`,
+                ),
+            })
+          } finally {
+            spinner.stop()
+          }
+        } else {
+          jobs = await withSpinner("Fetching jobs…", () => client.listJobs())
+        }
+        const capped = limit ? jobs.slice(0, limit) : jobs
+        if (jsonFlag) {
+          console.log(JSON.stringify(capped, null, 2))
+          return
+        }
+        const color = useColor()
+        // Tree only for the recursive view in a real terminal; a pipe or --flat
+        // gets full-path lines so `list --all | grep mobile` still matches.
+        const asTree = cmd.all && !cmd.flat && !!process.stdout.isTTY
+        console.log(
+          asTree
+            ? formatJobTree(capped, { color })
+            : formatJobList(capped, { color }),
+        )
+        return
+      }
+      const spec = parseBuildSpecifier(jobOrUrl)
+      const limit = cmd.limit ? parseInt(cmd.limit, 10) : 10
+      const builds = await withSpinner("Fetching builds…", () =>
+        client.listBuilds(spec.job, limit),
+      )
       if (jsonFlag) {
         console.log(JSON.stringify(builds, null, 2))
       } else {
-        console.log(formatBuildList(builds, { pretty }))
+        console.log(formatBuildList(builds, { pretty: useColor() }))
       }
     } catch (e) {
       formatError(e)
@@ -725,8 +787,14 @@ program
     try {
       const client = await getClient()
       const limit = parseInt(cmd.limit, 10) || 50
-      const jobs = await client.searchJobs(text, limit)
-      console.log(jobs.map((j) => j.name).join("\n"))
+      const jobs = await withSpinner(`Searching for "${text}"…`, () =>
+        client.searchJobs(text, limit),
+      )
+      if (program.opts().json) {
+        console.log(JSON.stringify(jobs, null, 2))
+      } else {
+        console.log(formatJobList(jobs, { color: useColor() }))
+      }
     } catch (e) {
       formatError(e)
       process.exit(1)

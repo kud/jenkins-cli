@@ -1015,6 +1015,8 @@ export const App = ({
       `${chalk.bold.cyan(key)} ${chalk.gray(label)}`
     const hints = [
       hint("↵", "menu"),
+      hint("r", "refresh"),
+      hint("t", "auto"),
       hint("?", "keys"),
       hint("q", "quit"),
     ].join(chalk.dim(" · "))

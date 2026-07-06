@@ -80,6 +80,80 @@ export function formatBuildList(builds, { pretty = false } = {}) {
   return builds.map((b) => formatStatus(b, { pretty })).join("\n")
 }
 
+// A job with no build colour is a folder (or an empty container). Jenkins
+// leaf jobs always report a colour (blue/red/…); folders never do.
+const isFolder = (job) => job.color === undefined || job.color === null
+
+const jobLabel = (name: string, folder: boolean, color: boolean) => {
+  const text = folder ? `${name}/` : name
+  if (!color) return text
+  return folder ? chalk.blue.bold(text) : text
+}
+
+// Flat listing (one full path per line). This is the machine-friendly view —
+// used verbatim under a pipe so `list --all | grep mobile` matches full paths.
+export function formatJobList(jobs, { color = false } = {}) {
+  return jobs
+    .map((j) => jobLabel(j.fullName || j.name || "", isFolder(j), color))
+    .join("\n")
+}
+
+interface JobTreeNode {
+  name: string
+  color: boolean
+  isJob: boolean
+  children: Map<string, JobTreeNode>
+}
+
+// Reconstruct the folder hierarchy from the flat `fullName` paths. Intermediate
+// segments become folder nodes even if their own job entry was omitted (e.g.
+// clipped by --limit), so the tree never dangles.
+const buildJobTree = (jobs): JobTreeNode => {
+  const root: JobTreeNode = {
+    name: "",
+    color: true,
+    isJob: false,
+    children: new Map(),
+  }
+  for (const j of jobs) {
+    const parts = (j.fullName || j.name || "").split("/").filter(Boolean)
+    let node = root
+    parts.forEach((part, idx) => {
+      let child = node.children.get(part)
+      if (!child) {
+        child = { name: part, color: true, isJob: false, children: new Map() }
+        node.children.set(part, child)
+      }
+      if (idx === parts.length - 1) {
+        child.isJob = true
+        child.color = !isFolder(j)
+      }
+      node = child
+    })
+  }
+  return root
+}
+
+// Human-friendly view: box-drawing tree, folders flagged and (optionally)
+// coloured. Used only when stdout is a TTY — never under a pipe.
+export function formatJobTree(jobs, { color = false } = {}) {
+  const root = buildJobTree(jobs)
+  const lines: string[] = []
+  const walk = (node: JobTreeNode, prefix: string) => {
+    const kids = [...node.children.values()]
+    kids.forEach((child, i) => {
+      const last = i === kids.length - 1
+      const folder = child.children.size > 0 || !child.color
+      lines.push(
+        prefix + (last ? "└── " : "├── ") + jobLabel(child.name, folder, color),
+      )
+      walk(child, prefix + (last ? "    " : "│   "))
+    })
+  }
+  walk(root, "")
+  return lines.join("\n")
+}
+
 export function formatError(err) {
   if (err && (err.status === 401 || err.status === 403)) {
     console.error("Auth error (check user/token permissions)")

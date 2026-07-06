@@ -435,6 +435,32 @@ export class JenkinsClient {
     return results
   }
 
+  // Fetch the top-level job list. A failure here means Jenkins is unreachable
+  // (bad URL/credentials, server down, or — most often — off the VPN), so we
+  // rethrow with a hint rather than letting callers swallow it into an empty
+  // result. Distinct from per-folder crawl errors, which callers tolerate.
+  private async _fetchRoot(): Promise<{ jobs?: JenkinsJob[] }> {
+    try {
+      return await this._request<{ jobs?: JenkinsJob[] }>(
+        `api/json?tree=jobs[name,url,color]`,
+      )
+    } catch (e) {
+      throw new Error(
+        `Cannot reach Jenkins at ${this.baseUrl}: ${(e as Error).message}. ` +
+          `Check the server URL and that you're connected (VPN?).`,
+      )
+    }
+  }
+
+  // List only the top-level jobs (a single request). This is the fast,
+  // predictable default for "list the jobs" — folders appear as entries you
+  // can drill into, rather than triggering a full recursive tree walk.
+  async listJobs(): Promise<JenkinsJob[]> {
+    const root = await this._fetchRoot()
+    for (const j of root.jobs || []) if (!j.fullName) j.fullName = j.name || ""
+    return root.jobs || []
+  }
+
   async searchJobs(query: string, limit = 50): Promise<JenkinsJob[]> {
     // New BFS recursive traversal without artificial depth restriction.
     // If limit === 0 treat as unlimited (subject to safety cap) to support large instances.
@@ -442,14 +468,11 @@ export class JenkinsClient {
     const effectiveLimit = limit === 0 ? safetyCap : limit
 
     // Start with shallow root job list; expand folders iteratively.
-    let root: { jobs?: JenkinsJob[] } = { jobs: [] }
-    try {
-      root = await this._request<{ jobs?: JenkinsJob[] }>(
-        `api/json?tree=jobs[name,url,color]`,
-      )
-    } catch {
-      return [] // Cannot even fetch root
-    }
+    // Root fetch is the reachability probe: if it fails, every folder crawl
+    // below is doomed too, so surface the error instead of returning an empty
+    // list that reads as "no matches" (masking e.g. an unreachable server /
+    // missing VPN). Inner folder failures stay forgiving further down.
+    const root = await this._fetchRoot()
 
     const queue: Array<{ job: JenkinsJob; path: string[] }> = []
     const results: JenkinsJob[] = []
@@ -521,14 +544,7 @@ export class JenkinsClient {
     const effectiveLimit = limit === 0 ? safetyCap : limit
     const concurrency = Math.min(Math.max(opts.concurrency ?? 5, 1), 10)
 
-    let root: { jobs?: JenkinsJob[] } = { jobs: [] }
-    try {
-      root = await this._request<{ jobs?: JenkinsJob[] }>(
-        `api/json?tree=jobs[name,url,color]`,
-      )
-    } catch {
-      return []
-    }
+    const root = await this._fetchRoot()
 
     const queue: Array<{ job: JenkinsJob; path: string[] }> = []
     const results: JenkinsJob[] = []

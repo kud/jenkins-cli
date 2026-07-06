@@ -81,7 +81,10 @@ export const ScrollList = ({
     <Box flexDirection="column" width={width} overflow="hidden">
       {visible.map((it, i) => {
         const idx = start + i
-        const line = idx === selected ? chalk.inverse(` ${it}`) : `  ${it}`
+        // Both branches must use the SAME gutter width (two leading spaces) or
+        // the selected row shifts left by a column and its right edge gains a
+        // character before truncate. The inverse just recolours that gutter.
+        const line = idx === selected ? chalk.inverse(`  ${it}`) : `  ${it}`
         return (
           <Text key={idx} wrap="truncate">
             {line}
