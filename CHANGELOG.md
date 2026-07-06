@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ---
 
+## Unreleased — 2026-07-06
+
+### Highlights
+
+- `stages --watch` (or `-w`) turns the pipeline graph into a live view: it repaints in place every ~2.5s, animates a spinner on whichever stage is currently running, and exits automatically the moment the build finishes — no more re-running `stages` to check progress. It implies `--graph`, and falls back to a single static render when output isn't a real terminal (piped, or `--json`), so scripts and CI logs are unaffected. ([5f019e9](https://github.com/kud/jenkins-cli/commit/5f019e9cc6125c8117ed7044c01ece72ca4d5d4e))
+
 ## 1.1.0 — 2026-07-06
 
 ### Highlights
