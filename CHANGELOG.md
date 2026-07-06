@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 ---
 
+## 1.0.1 — 2026-07-06
+
+### Highlights
+
+- `jenkins list` with no argument now lists top-level jobs in a single request; add `--all` to recurse the whole folder tree (rendered as a tree in a terminal, or force a flat list with `--flat` — handy for piping into `grep`). ([398ce02](https://github.com/kud/jenkins-cli/commit/398ce02d46614eb87fef7911d9dab3b424b11973))
+- Network calls now show a spinner on stderr so long-running requests don't look hung — it stays out of stdout and disappears automatically in pipes, CI, and dumb terminals. ([398ce02](https://github.com/kud/jenkins-cli/commit/398ce02d46614eb87fef7911d9dab3b424b11973))
+- Colour output is now on by default in a real terminal, and turns off automatically for `--json`, `--no-color`, `NO_COLOR`, or when output is piped — so scripts always get clean, parseable text. ([398ce02](https://github.com/kud/jenkins-cli/commit/398ce02d46614eb87fef7911d9dab3b424b11973))
+- The interactive UI's footer now shows key hints for `r` (refresh) and `t` (auto-refresh), so those controls are discoverable without checking the docs. ([398ce02](https://github.com/kud/jenkins-cli/commit/398ce02d46614eb87fef7911d9dab3b424b11973))
+
+### Fixes
+
+- A Jenkins connection failure (wrong URL, VPN down) used to return silently as an empty job list — it now surfaces a clear error telling you the server can't be reached. ([398ce02](https://github.com/kud/jenkins-cli/commit/398ce02d46614eb87fef7911d9dab3b424b11973))
+- The selected row in the interactive build list no longer shifts columns out of alignment when you move the selection. ([398ce02](https://github.com/kud/jenkins-cli/commit/398ce02d46614eb87fef7911d9dab3b424b11973))
+
+### Internal
+
+- Added a GitHub Actions workflow to publish releases to npm via OIDC trusted publishing. ([a7e4275](https://github.com/kud/jenkins-cli/commit/a7e427515d1c7df8708614bc165cdbd032a1df58))
+
 ## 1.0.0 — 2026-07-03
 
 The interactive TUI has been rewritten from the ground up on Ink/React, replacing the old neo-blessed screen. This is the headline reason for the 1.0.0 bump — everything else in this release builds on top of that new foundation.
