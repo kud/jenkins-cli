@@ -118,16 +118,16 @@ const stageStyle = (status: string) => {
   }
 }
 
-// A horizontal pipeline flow: coloured status glyph + stage name + duration per
-// node, joined by arrows and wrapped to the terminal width so long pipelines
-// flow onto the next line rather than bleeding off-screen. `wfapi/describe`
-// gives a flat, linear stage list — parallel branches are not distinguished, so
-// this renders the sequence in order.
+// A vertical pipeline flow: one stage per line down a spine, with the status
+// glyph coloured and names/durations aligned into columns so many-stage
+// pipelines stay scannable (a horizontal flow wraps into an unreadable block).
+// `wfapi/describe` gives a flat, linear stage list — parallel branches are not
+// distinguished, so this renders the sequence in order.
 export function formatPipelineGraph(
   data,
   { color = false, width = 80, label = "Build" } = {},
 ) {
-  const arrow = DISABLE_UNICODE_ICONS ? "->" : "─▶"
+  const ascii = DISABLE_UNICODE_ICONS
   const paint = (fn, s: string) => (color ? fn(s) : s)
   const overall = stageStyle(data?.status)
   const header = `${label} · ${paint(overall.paint, data?.status || "?")} · ${fmtMillis(data?.durationMillis)}`
@@ -136,30 +136,48 @@ export function formatPipelineGraph(
   if (!stages.length)
     return `${header}\n(no stages — not a Declarative/Scripted pipeline build?)`
 
-  const nodes = stages.map((st) => {
-    const style = stageStyle(st.status)
-    const dur = fmtMillis(st.durationMillis)
-    const plain = `${style.icon} ${st.name}${dur ? ` ${dur}` : ""}`
-    return { plain, painted: color ? style.paint(plain) : plain }
-  })
+  const names = stages.map((s) => s.name || "")
+  const durs = stages.map((s) => fmtMillis(s.durationMillis))
+  const styles = stages.map((s) => stageStyle(s.status))
 
-  // Wrap on visible (plain) length; a trailing arrow signals the flow continues.
-  const lines: string[] = []
-  let line = ""
-  let len = 0
-  nodes.forEach((n, i) => {
-    const sep = i === 0 ? "" : ` ${arrow} `
-    const add = sep.length + n.plain.length
-    if (len + add > width && len > 0) {
-      lines.push(`${line} ${arrow}`)
-      line = n.painted
-      len = n.plain.length
-    } else {
-      line += sep + n.painted
-      len += add
-    }
+  // Glyphs are padded to a common width so the name column lines up even with
+  // the variable-width ASCII fallbacks ([OK]/[X]/…).
+  const glyphW = Math.max(...styles.map((s) => s.icon.length))
+  const maxDur = Math.max(0, ...durs.map((d) => d.length))
+  // Bound the name column by the terminal so long names don't push durations
+  // off-screen; over-long names are ellipsised.
+  const reserved = 2 /* spine */ + 1 + glyphW + 1 + 2 /* gaps */ + maxDur
+  const nameCap = Math.max(10, width - reserved)
+  const nameCol = Math.min(Math.max(0, ...names.map((n) => n.length)), nameCap)
+  const ell = ascii ? "." : "…"
+  const fitName = (n: string) =>
+    n.length > nameCol ? n.slice(0, nameCol - 1) + ell : n.padEnd(nameCol)
+
+  // Spine with a tee off each stage: ┌─ first, ├─ middle, └─ last — every step
+  // visibly hangs off a single connected pipeline flowing down.
+  const spine = (i: number) => {
+    if (stages.length === 1) return ascii ? "--" : "──"
+    if (i === 0) return ascii ? "+-" : "┌─"
+    if (i === stages.length - 1) return ascii ? "+-" : "└─"
+    return ascii ? "|-" : "├─"
+  }
+
+  const lines = stages.map((st, i) => {
+    const icon = styles[i].icon.padEnd(glyphW)
+    // Failure is the one state worth shouting: its whole row goes bold red so a
+    // single failed stage is unmissable in a wall of passing ones. Everything
+    // else stays glyph-only + grey duration, keeping the list calm.
+    const failed = /FAIL/.test(String(st.status).toUpperCase())
+    const nameCell = fitName(names[i])
+    const glyph = !color
+      ? icon
+      : failed
+        ? chalk.red.bold(icon)
+        : styles[i].paint(icon)
+    const name = color && failed ? chalk.red.bold(nameCell) : nameCell
+    const dur = color && durs[i] ? chalk.gray(durs[i]) : durs[i]
+    return `${spine(i)} ${glyph} ${name}  ${dur}`.trimEnd()
   })
-  if (line) lines.push(line)
   return [header, "", ...lines].join("\n")
 }
 

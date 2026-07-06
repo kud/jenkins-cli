@@ -491,24 +491,34 @@ program
   })
 
 program
-  .command("stages <job> <buildNumber>")
-  .description("Fetch pipeline stages (workflow-api plugin required)")
+  .command("stages <job> [buildNumber]")
+  .description(
+    "Fetch pipeline stages (workflow-api plugin required); omit buildNumber (or pass 'latest') for the most recent build",
+  )
   .option("-g, --graph", "Render stages as a horizontal pipeline flow")
   .action(async (job, buildNumber, cmd) => {
     try {
       const client = await getClient()
+      // Omitted or the literal "latest" => let the client resolve lastBuild.
+      const ref =
+        !buildNumber || buildNumber === "latest" ? undefined : buildNumber
       const data = await withSpinner("Fetching stages…", () =>
-        client.getPipelineStages(job, buildNumber),
+        client.getPipelineStages(job, ref),
       )
       const jsonFlag = program.opts().json
       if (jsonFlag) {
         console.log(JSON.stringify(data, null, 2))
       } else if (cmd.graph) {
+        // Label from the resolved build: wfapi echoes its name/id, so "latest"
+        // still prints the concrete build (e.g. #1360), not the word "latest".
+        const build =
+          data?.name ||
+          (data?.id != null ? `#${data.id}` : ref ? `#${ref}` : "latest")
         console.log(
           formatPipelineGraph(data, {
             color: useColor(),
             width: process.stdout.columns || 80,
-            label: `${job} #${buildNumber}`,
+            label: `${job} ${build}`,
           }),
         )
       } else if (data.stages) {

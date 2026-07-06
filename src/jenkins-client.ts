@@ -312,9 +312,15 @@ export class JenkinsClient {
     )
   }
 
-  async getPipelineStages(job: string, buildNumber: number): Promise<any> {
+  // buildNumber omitted => resolve Jenkins' `lastBuild` permalink server-side,
+  // so `stages <job>` targets the latest build (matching getBuild/getBuildChanges).
+  async getPipelineStages(
+    job: string,
+    buildNumber?: number | string,
+  ): Promise<any> {
+    const ref = buildNumber ?? "lastBuild"
     return this._request<any>(
-      `job/${encodeURIComponent(job)}/${buildNumber}/wfapi/describe`,
+      `job/${encodeURIComponent(job)}/${ref}/wfapi/describe`,
     )
   }
 
