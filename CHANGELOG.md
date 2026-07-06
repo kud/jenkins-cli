@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## 1.1.0 — 2026-07-06
+
+### Highlights
+
+- The `stages --graph` pipeline view has been redesigned as a vertical spine — each stage on its own line, connected by `┌─`/`├─`/`└─` — so long pipelines (20+ stages) stay readable instead of wrapping into a dense horizontal block. ([f6aefef](https://github.com/kud/jenkins-cli/commit/f6aefef4cb908e83e44346e540139feb4112a1f0))
+- Stage name and duration columns are now aligned, with over-long names ellipsised to fit the terminal width, and colour is used with intent: the status glyph carries the colour, names stay neutral, durations render grey, and a failed stage's entire row goes bold red so failures jump out immediately. ([f6aefef](https://github.com/kud/jenkins-cli/commit/f6aefef4cb908e83e44346e540139feb4112a1f0))
+- `stages <job>` no longer requires a build number — omit it, or pass `latest`, to target the most recent build, matching how the other commands already behave. ([f6aefef](https://github.com/kud/jenkins-cli/commit/f6aefef4cb908e83e44346e540139feb4112a1f0))
+
 ## 1.0.1 — 2026-07-06
 
 ### Highlights
