@@ -80,6 +80,89 @@ export function formatBuildList(builds, { pretty = false } = {}) {
   return builds.map((b) => formatStatus(b, { pretty })).join("\n")
 }
 
+// Compact millis → human duration for stage graphs (12s, 2m, 1m30s, 1h5m).
+const fmtMillis = (ms) => {
+  if (ms == null) return ""
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return s % 60 ? `${m}m${s % 60}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  return m % 60 ? `${h}h${m % 60}m` : `${h}h`
+}
+
+// Per-stage glyph + colour, with an ASCII fallback so the graph survives dumb
+// terminals / JENKINS_CLI_NO_ICONS (same philosophy as the icon fallbacks above).
+const stageStyle = (status: string) => {
+  const ascii = DISABLE_UNICODE_ICONS
+  switch ((status || "").toUpperCase()) {
+    case "SUCCESS":
+      return { icon: ascii ? "[OK]" : "✓", paint: chalk.green }
+    case "FAILED":
+    case "FAILURE":
+      return { icon: ascii ? "[X]" : "✗", paint: chalk.red }
+    case "IN_PROGRESS":
+    case "RUNNING":
+      return { icon: ascii ? "[>]" : "▶", paint: chalk.cyan }
+    case "UNSTABLE":
+      return { icon: ascii ? "[!]" : "▲", paint: chalk.yellow }
+    case "ABORTED":
+      return { icon: ascii ? "[-]" : "⊘", paint: chalk.gray }
+    case "PAUSED":
+      return { icon: ascii ? "[||]" : "⏸", paint: chalk.blue }
+    case "NOT_EXECUTED":
+    case "SKIPPED":
+      return { icon: ascii ? "[ ]" : "○", paint: chalk.dim }
+    default:
+      return { icon: ascii ? "[?]" : "•", paint: (s: string) => s }
+  }
+}
+
+// A horizontal pipeline flow: coloured status glyph + stage name + duration per
+// node, joined by arrows and wrapped to the terminal width so long pipelines
+// flow onto the next line rather than bleeding off-screen. `wfapi/describe`
+// gives a flat, linear stage list — parallel branches are not distinguished, so
+// this renders the sequence in order.
+export function formatPipelineGraph(
+  data,
+  { color = false, width = 80, label = "Build" } = {},
+) {
+  const arrow = DISABLE_UNICODE_ICONS ? "->" : "─▶"
+  const paint = (fn, s: string) => (color ? fn(s) : s)
+  const overall = stageStyle(data?.status)
+  const header = `${label} · ${paint(overall.paint, data?.status || "?")} · ${fmtMillis(data?.durationMillis)}`
+
+  const stages = data?.stages || []
+  if (!stages.length)
+    return `${header}\n(no stages — not a Declarative/Scripted pipeline build?)`
+
+  const nodes = stages.map((st) => {
+    const style = stageStyle(st.status)
+    const dur = fmtMillis(st.durationMillis)
+    const plain = `${style.icon} ${st.name}${dur ? ` ${dur}` : ""}`
+    return { plain, painted: color ? style.paint(plain) : plain }
+  })
+
+  // Wrap on visible (plain) length; a trailing arrow signals the flow continues.
+  const lines: string[] = []
+  let line = ""
+  let len = 0
+  nodes.forEach((n, i) => {
+    const sep = i === 0 ? "" : ` ${arrow} `
+    const add = sep.length + n.plain.length
+    if (len + add > width && len > 0) {
+      lines.push(`${line} ${arrow}`)
+      line = n.painted
+      len = n.plain.length
+    } else {
+      line += sep + n.painted
+      len += add
+    }
+  })
+  if (line) lines.push(line)
+  return [header, "", ...lines].join("\n")
+}
+
 // A job with no build colour is a folder (or an empty container). Jenkins
 // leaf jobs always report a colour (blue/red/…); folders never do.
 const isFolder = (job) => job.color === undefined || job.color === null

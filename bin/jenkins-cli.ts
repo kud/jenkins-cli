@@ -21,6 +21,7 @@ import {
   formatLogsChunk,
   formatJobList,
   formatJobTree,
+  formatPipelineGraph,
 } from "../src/format.js"
 import {
   normalizeUrl,
@@ -492,21 +493,31 @@ program
 program
   .command("stages <job> <buildNumber>")
   .description("Fetch pipeline stages (workflow-api plugin required)")
-  .action(async (job, buildNumber) => {
+  .option("-g, --graph", "Render stages as a horizontal pipeline flow")
+  .action(async (job, buildNumber, cmd) => {
     try {
       const client = await getClient()
-      const data = await client.getPipelineStages(job, buildNumber)
+      const data = await withSpinner("Fetching stages…", () =>
+        client.getPipelineStages(job, buildNumber),
+      )
       const jsonFlag = program.opts().json
-      if (jsonFlag) console.log(JSON.stringify(data, null, 2))
-      else {
-        if (data.stages) {
-          data.stages.forEach((s) =>
-            console.log(
-              `${s.id}\t${s.name}\t${s.status}\t${Math.round((s.durationMillis || 0) / 1000)}s`,
-            ),
-          )
-        } else console.log("No stages")
-      }
+      if (jsonFlag) {
+        console.log(JSON.stringify(data, null, 2))
+      } else if (cmd.graph) {
+        console.log(
+          formatPipelineGraph(data, {
+            color: useColor(),
+            width: process.stdout.columns || 80,
+            label: `${job} #${buildNumber}`,
+          }),
+        )
+      } else if (data.stages) {
+        data.stages.forEach((s) =>
+          console.log(
+            `${s.id}\t${s.name}\t${s.status}\t${Math.round((s.durationMillis || 0) / 1000)}s`,
+          ),
+        )
+      } else console.log("No stages")
     } catch (e) {
       formatError(e)
       process.exit(1)
