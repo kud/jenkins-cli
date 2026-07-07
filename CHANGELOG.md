@@ -4,7 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
-## Unreleased — 2026-07-06
+## 1.2.0 — 2026-07-07
+
+### Highlights
+
+- Interactive mode gains a three-level drill-down overlay — press `p` (or use the actions menu) to step from stage to step to log for any build without leaving the explorer. The standalone `ui <job>` command is gone; `interactive [job]` now takes an optional job argument to jump straight into single-job view. ([4c232d4](https://github.com/kud/jenkins-cli/commit/4c232d48ca324bc5f0f001310551d61748f5c327))
+- The job list now shows a coloured dot per job reflecting its last build's health at a glance, and every scrollable list highlights its selection with a `❯` caret instead of reverse-video, for a cleaner, more legible look. ([4c232d4](https://github.com/kud/jenkins-cli/commit/4c232d48ca324bc5f0f001310551d61748f5c327))
+
+## 1.1.1 — 2026-07-06
 
 ### Highlights
 
