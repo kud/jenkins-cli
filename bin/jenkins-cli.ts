@@ -827,32 +827,45 @@ program
     }
   })
 
-// Root action: if no subcommand and -i provided, launch interactive; else show help.
+// Root action (fires only when no subcommand matched). Launch the interactive
+// explorer when asked explicitly (-i), or as the default for a bare `jenkins`
+// when stdout is a TTY and a server is fully configured. Otherwise fall back to
+// help — this keeps pipes, CI, and first-run (unconfigured) users on the safe,
+// side-effect-free path.
 program.action(async () => {
   const opts = program.opts()
-  if (opts.interactive) {
-    try {
-      const client = await getClient()
-      const { runInteractive } = await import("../src/ui/interactive.js")
-      const pre = opts.project || null
-      const jobsFilter = opts.jobs
-        ? opts.jobs
-            .split(",")
-            .map((j) => j.trim())
-            .filter(Boolean)
-        : null
-      await runInteractive(client, {
-        forceBasicColor: !!opts.basicColors,
-        preselectJob: pre,
-        noTerminfo: !!opts.noTerminfo,
-        jobsFilter,
-      })
-    } catch (e) {
-      formatError(e)
-      process.exit(1)
-    }
-  } else {
+  const resolved = resolveConfig({
+    url: opts.url,
+    user: opts.user,
+    token: opts.token,
+    server: opts.server,
+  })
+  const configured = !!(resolved.url && resolved.user && resolved.token)
+  const wantInteractive =
+    opts.interactive || (!!process.stdout.isTTY && configured)
+  if (!wantInteractive) {
     program.outputHelp()
+    return
+  }
+  try {
+    const client = await getClient()
+    const { runInteractive } = await import("../src/ui/interactive.js")
+    const pre = opts.project || null
+    const jobsFilter = opts.jobs
+      ? opts.jobs
+          .split(",")
+          .map((j) => j.trim())
+          .filter(Boolean)
+      : null
+    await runInteractive(client, {
+      forceBasicColor: !!opts.basicColors,
+      preselectJob: pre,
+      noTerminfo: !!opts.noTerminfo,
+      jobsFilter,
+    })
+  } catch (e) {
+    formatError(e)
+    process.exit(1)
   }
 })
 
