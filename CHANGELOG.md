@@ -4,11 +4,13 @@ All notable changes to this project are documented here.
 
 ---
 
-## Unreleased — 2026-07-08
+## 1.3.0 — 2026-07-08
 
 ### Highlights
 
 - Running bare `jenkins` with no subcommand now drops you straight into the interactive TUI, as long as stdout is a real terminal and a server is fully configured (URL, user, and token all resolved) — no more typing `jenkins -i` out of habit. Pipes, CI, and first-run/unconfigured setups are unaffected and still fall back to `--help`, so nothing pipes-and-scripts-safe changes underfoot. ([8232af0](https://github.com/kud/jenkins-cli/commit/8232af046bd0d0e8e49d93c1c1166e09dafc32b2))
+
+> **Note:** this feature first shipped as `1.2.1`, which under-classified a new default behaviour as a patch. `1.3.0` re-releases it under the correct minor bump; `1.2.1` is superseded.
 
 ## 1.2.0 — 2026-07-07
 
