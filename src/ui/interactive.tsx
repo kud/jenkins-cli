@@ -1,6 +1,6 @@
-import { render } from "ink"
+import { render, useApp } from "ink"
 import type { JenkinsClient } from "@kud/jenkins"
-import { App } from "./app.js"
+import { JenkinsBody, type JenkinsBodyProps } from "@kud/jenkins-ink"
 
 export interface RunInteractiveOpts {
   jobSearchLimit?: number
@@ -15,6 +15,14 @@ export interface RunInteractiveOpts {
 // the user's scrollback back untouched on exit.
 const ENTER_ALT = "\x1b[?1049h\x1b[H"
 const LEAVE_ALT = "\x1b[?1049l"
+
+// The interactive grid now lives in @kud/jenkins-ink as the embeddable
+// <JenkinsBody> — the same component cockpit mounts. This shell owns only the
+// full-screen takeover and wires the body's onExit to Ink's app exit.
+const Root = (props: Omit<JenkinsBodyProps, "onExit">) => {
+  const { exit } = useApp()
+  return <JenkinsBody {...props} onExit={exit} />
+}
 
 export async function runInteractive(
   client: JenkinsClient,
@@ -34,7 +42,7 @@ export async function runInteractive(
   process.once("exit", restore)
 
   const instance = render(
-    <App
+    <Root
       client={client}
       jobSearchLimit={opts.jobSearchLimit ?? 0}
       buildsLimit={opts.buildsLimit ?? 15}
