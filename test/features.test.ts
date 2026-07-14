@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JenkinsClient } from '../src/jenkins-client.js';
+import { JenkinsClient } from "@kud/jenkins";
 
 // Controlled mock fetch for multiple behaviors
 const calls = [];

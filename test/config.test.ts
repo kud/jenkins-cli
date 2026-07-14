@@ -9,7 +9,7 @@ const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'jenkins-cli-home-'));
 process.env.HOME = tempHome; // posix
 process.env.USERPROFILE = tempHome; // windows fallback
 
-const cfgMod = await import('../src/config.js');
+const cfgMod = await import("@kud/jenkins");
 const { addServer, listServers, useServer, removeServer, loadConfig } = cfgMod;
 
 test('multi-server add/use/remove lifecycle', async () => {

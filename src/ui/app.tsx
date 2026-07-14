@@ -4,8 +4,12 @@ import chalk from "chalk"
 import { exec } from "node:child_process"
 import { writeFileSync } from "node:fs"
 import { resolve } from "node:path"
-import type { JenkinsClient } from "../jenkins-client.js"
-import type { JenkinsArtifact, JenkinsBuild, JenkinsJob } from "../types.js"
+import type {
+  JenkinsClient,
+  JenkinsArtifact,
+  JenkinsBuild,
+  JenkinsJob,
+} from "@kud/jenkins"
 import {
   appendToLog,
   emptyLogAppendState,

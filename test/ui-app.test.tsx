@@ -2,7 +2,7 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import { render } from "ink-testing-library"
 import { App } from "../src/ui/app.js"
-import type { JenkinsClient } from "../src/jenkins-client.js"
+import type { JenkinsClient } from "@kud/jenkins"
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 

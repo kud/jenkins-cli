@@ -1,5 +1,5 @@
 import { render } from "ink"
-import type { JenkinsClient } from "../jenkins-client.js"
+import type { JenkinsClient } from "@kud/jenkins"
 import { App } from "./app.js"
 
 export interface RunInteractiveOpts {

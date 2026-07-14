@@ -12,8 +12,8 @@ import {
   removeServer,
   listServers,
   CONFIG_FILE,
-} from "../src/config.js"
-import { JenkinsClient } from "../src/jenkins-client.js"
+} from "@kud/jenkins"
+import { JenkinsClient } from "@kud/jenkins"
 import {
   formatStatus,
   formatBuildList,
@@ -23,11 +23,7 @@ import {
   formatJobTree,
   formatPipelineGraph,
 } from "../src/format.js"
-import {
-  normalizeUrl,
-  ensureScheme,
-  parseBuildSpecifier,
-} from "../src/url-utils.js"
+import { normalizeUrl, ensureScheme, parseBuildSpecifier } from "@kud/jenkins"
 import { withSpinner, createSpinner } from "../src/spinner.js"
 
 // Colour is on by default when stdout is an interactive terminal, and off when

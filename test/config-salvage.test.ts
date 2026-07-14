@@ -9,7 +9,7 @@ const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'jenkins-cli-home-salvage
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
 
-const cfgMod = await import('../src/config.js');
+const cfgMod = await import("@kud/jenkins");
 const { CONFIG_FILE, loadConfig, saveConfig, resolveConfig } = cfgMod;
 
 // Corrupted file with markdown link and trailing garbage

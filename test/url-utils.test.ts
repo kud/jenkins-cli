@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeUrl, ensureScheme, parseBuildSpecifier } from '../src/url-utils.js';
+import { normalizeUrl, ensureScheme, parseBuildSpecifier } from "@kud/jenkins";
 
 test('normalizeUrl adds missing //', () => {
   assert.equal(normalizeUrl('https:ci.example.com'), 'https://ci.example.com');

@@ -441,7 +441,7 @@ const detectAndHighlightCode = (line) => {
   return null // Let manual highlighting handle it
 }
 
-import { sanitizeLogChunk } from "./log-sanitizer.js"
+import { sanitizeLogChunk } from "@kud/jenkins"
 
 export function formatLogsChunk(chunk) {
   const sanitized = sanitizeLogChunk(chunk, { stripAnsi: true })
