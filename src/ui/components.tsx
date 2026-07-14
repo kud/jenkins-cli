@@ -1,17 +1,5 @@
 import { Box, Text } from "ink"
-import chalk from "chalk"
 import type { ReactNode } from "react"
-
-// Compute the window start so the selected row stays visible (centred when possible).
-export const windowStart = (
-  selected: number,
-  total: number,
-  rows: number,
-): number => {
-  if (total <= rows) return 0
-  const start = selected - Math.floor(rows / 2)
-  return Math.max(0, Math.min(start, total - rows))
-}
 
 interface PanelProps {
   title: string
@@ -47,71 +35,6 @@ export const Panel = ({
       {focused ? `${title} ●` : title}
     </Text>
     {children}
-  </Box>
-)
-
-interface ScrollListProps {
-  items: string[] // may contain chalk/ANSI colour codes
-  selected: number
-  rows: number
-  width: number
-  emptyText: string
-}
-
-// A vertically-windowed selectable list. Selection is shown with a caret marker
-// — the single selection language across every list in the app (reverse video
-// washed out coloured rows and glared on plain ones). An explicit width +
-// overflow:hidden is what gives `truncate` a hard boundary — without it Ink
-// measures the natural (content) width and long rows bleed out.
-export const ScrollList = ({
-  items,
-  selected,
-  rows,
-  width,
-  emptyText,
-}: ScrollListProps) => {
-  if (!items.length)
-    return (
-      <Text color="gray" wrap="truncate">
-        {emptyText}
-      </Text>
-    )
-  const start = windowStart(selected, items.length, Math.max(1, rows))
-  const visible = items.slice(start, start + Math.max(1, rows))
-  return (
-    <Box flexDirection="column" width={width} overflow="hidden">
-      {visible.map((it, i) => {
-        const idx = start + i
-        // A 2-column gutter in both branches keeps every row aligned (the caret
-        // occupies the first column of the selected row; a plain space, the rest).
-        const line = idx === selected ? `${chalk.cyan("❯")} ${it}` : `  ${it}`
-        return (
-          <Text key={idx} wrap="truncate">
-            {line}
-          </Text>
-        )
-      })}
-    </Box>
-  )
-}
-
-// A dumb log viewport — App pre-renders the visible slice (already chalk-formatted)
-// so this component only lays lines out. The explicit width + overflow:hidden is
-// essential: it bounds `truncate` so wide log lines are clipped, not wrapped into
-// the neighbouring panels.
-export const LogView = ({
-  lines,
-  width,
-}: {
-  lines: string[]
-  width: number
-}) => (
-  <Box flexDirection="column" width={width} overflow="hidden">
-    {lines.map((l, i) => (
-      <Text key={i} wrap="truncate">
-        {l.length ? l : " "}
-      </Text>
-    ))}
   </Box>
 )
 

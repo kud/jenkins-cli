@@ -21,8 +21,14 @@ import {
   type LogAppendState,
   type LogLine,
 } from "./log-format.js"
-import { LogView, Overlay, Panel, ScrollList, StatusBar } from "./components.js"
-import { formatStageRows } from "../format.js"
+import { Overlay, Panel, StatusBar } from "./components.js"
+import {
+  BuildInfo,
+  BuildList,
+  JobList,
+  LogView,
+  StageTree,
+} from "@kud/jenkins-ink"
 
 export interface AppProps {
   client: JenkinsClient
@@ -72,62 +78,6 @@ const clamp = (v: number, lo: number, hi: number) =>
 
 const buildState = (b: JenkinsBuild) =>
   b.building ? "RUNNING" : b.result || "UNKNOWN"
-
-const fmtDuration = (b: JenkinsBuild) => {
-  const d = b.building
-    ? Date.now() - (b.timestamp || Date.now())
-    : b.duration || 0
-  if (d < 1000) return `${d}ms`
-  if (d < 60000) return `${Math.round(d / 1000)}s`
-  if (d < 3600000) return `${Math.round(d / 60000)}m`
-  return `${Math.round(d / 3600000)}h`
-}
-
-const fmtAge = (b: JenkinsBuild) => {
-  if (!b.timestamp) return "-"
-  const ms = Date.now() - b.timestamp
-  if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))}s ago`
-  if (ms < 3600000) return `${Math.round(ms / 60000)}m ago`
-  if (ms < 86400000) return `${Math.round(ms / 3600000)}h ago`
-  return `${Math.round(ms / 86400000)}d ago`
-}
-
-const pad = (s: string, len: number) =>
-  s.length >= len ? s.slice(0, len) : s + " ".repeat(len - s.length)
-
-// One coloured build row: "#num  STATE  dur  age".
-const colorizeBuild = (b: JenkinsBuild) => {
-  const state = buildState(b)
-  const paint =
-    state === "RUNNING"
-      ? chalk.yellow
-      : state === "SUCCESS"
-        ? chalk.green
-        : state === "FAILURE"
-          ? chalk.red
-          : state === "UNSTABLE"
-            ? chalk.magenta
-            : state === "ABORTED"
-              ? chalk.cyan
-              : chalk.white
-  return paint(
-    `${pad(`#${b.number}`, 7)} ${pad(state, 9)} ${pad(fmtDuration(b), 6)} ${pad(fmtAge(b), 8)}`,
-  )
-}
-
-// A status dot from a job's Jenkins `color` (its last build's health): blue =
-// success, red = failure, yellow = unstable, *_anime = a build running now,
-// grey/disabled = idle, no colour = a folder.
-const jobDot = (color?: string): string => {
-  const c = (color || "").toLowerCase()
-  if (!c) return chalk.gray("▸")
-  if (c.includes("anime")) return chalk.cyan("◐")
-  if (c.startsWith("blue")) return chalk.green("●")
-  if (c.startsWith("red")) return chalk.red("●")
-  if (c.startsWith("yellow")) return chalk.yellow("●")
-  if (c.startsWith("aborted")) return chalk.gray("●")
-  return chalk.gray("○")
-}
 
 const useTermSize = () => {
   const { stdout } = useStdout()
@@ -1100,13 +1050,6 @@ export const App = ({
   // ---- render helpers ------------------------------------------------------
   const visibleLog = visualLog.slice(logScroll, logScroll + logRows)
 
-  const jobItems = filteredJobs.map((j) => {
-    const name = j.fullName || j.name || ""
-    const dot = jobDot(j.color)
-    return j.error ? `${dot} ${chalk.red(`${name} — ERROR`)}` : `${dot} ${name}`
-  })
-  const buildItems = filteredBuilds.map(colorizeBuild)
-
   // Footer: context on the left, live state chips + hints right-aligned.
   const footer = (() => {
     if (confirm) {
@@ -1283,9 +1226,6 @@ export const App = ({
           ? ` · ${stageName}`
           : ` · ${stageName} › ${stepName}`
     const title = `Stages — ${currentJob ?? "job"} #${selectedBuild?.number ?? "?"}${crumb}`
-    // Match the Overlay's actual content box (width capped at 100, minus its
-    // paddingX) so long log lines truncate inside the border, not past it.
-    const innerW = Math.max(10, Math.min(cols - 4, 100) - 2)
     const innerRows = Math.max(1, rows - 6)
     const hint =
       stageLevel === "stages"
@@ -1295,35 +1235,16 @@ export const App = ({
           : "↑/↓ scroll · Esc back · q close"
     return (
       <Overlay title={title} color="green" width={cols} height={rows}>
-        {stageLevel === "stages" &&
-          (stages.length ? (
-            <ScrollList
-              items={formatStageRows(stages, { color: true, spine: true })}
-              selected={stageSel}
-              rows={innerRows}
-              width={innerW}
-              emptyText="No stages"
-            />
-          ) : (
-            <Text color="gray">No stages (not a pipeline build?)</Text>
-          ))}
-        {stageLevel === "steps" && (
-          <ScrollList
-            items={formatStageRows(stageSteps, { color: true, spine: true })}
-            selected={stepSel}
-            rows={innerRows}
-            width={innerW}
-            emptyText="No steps"
-          />
-        )}
-        {stageLevel === "log" && (
-          <LogView
-            lines={stepLog
-              .split("\n")
-              .slice(stepLogScroll, stepLogScroll + innerRows)}
-            width={innerW}
-          />
-        )}
+        <StageTree
+          level={stageLevel}
+          stages={stages}
+          steps={stageSteps}
+          stepLog={stepLog
+            .split("\n")
+            .slice(stepLogScroll, stepLogScroll + innerRows)}
+          selected={stageLevel === "steps" ? stepSel : stageSel}
+          rows={innerRows}
+        />
         <Text> </Text>
         <Text color="gray">{hint}</Text>
       </Overlay>
@@ -1384,37 +1305,6 @@ export const App = ({
   }
 
   // ---- main layout ---------------------------------------------------------
-  const meta = selectedBuild ? (
-    <>
-      <Text wrap="truncate">
-        <Text bold>#{selectedBuild.number}</Text>
-        {"  "}
-        <Text
-          color={
-            selectedBuild.building
-              ? "yellow"
-              : selectedBuild.result === "SUCCESS"
-                ? "green"
-                : selectedBuild.result === "FAILURE"
-                  ? "red"
-                  : "cyan"
-          }
-        >
-          {buildState(selectedBuild)}
-        </Text>
-        {"  "}
-        <Text color="cyan">{fmtDuration(selectedBuild)}</Text>
-        {"  "}
-        <Text color="gray">
-          {selectedBuild.timestamp
-            ? new Date(selectedBuild.timestamp).toLocaleString()
-            : ""}
-        </Text>
-      </Text>
-    </>
-  ) : (
-    <Text color="gray">Select a build</Text>
-  )
 
   return (
     <Box width={cols} height={rows} flexDirection="column">
@@ -1427,11 +1317,10 @@ export const App = ({
             width={jobsWidth}
             height={bodyHeight}
           >
-            <ScrollList
-              items={jobItems}
+            <JobList
+              jobs={filteredJobs}
               selected={jobSel}
               rows={listRows}
-              width={Math.max(1, jobsWidth - 2)}
               emptyText="Loading jobs…"
             />
           </Panel>
@@ -1443,11 +1332,10 @@ export const App = ({
           width={buildsWidth}
           height={bodyHeight}
         >
-          <ScrollList
-            items={buildItems}
+          <BuildList
+            builds={filteredBuilds}
             selected={buildSel}
             rows={listRows}
-            width={Math.max(1, buildsWidth - 2)}
             emptyText="Select a job"
           />
         </Panel>
@@ -1463,7 +1351,7 @@ export const App = ({
             <Text color="cyan" bold wrap="truncate">
               Build Info
             </Text>
-            {meta}
+            <BuildInfo build={selectedBuild} />
           </Box>
           <Panel
             title="Logs"
