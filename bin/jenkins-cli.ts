@@ -11,6 +11,7 @@ import {
   useServer,
   removeServer,
   listServers,
+  listInstances,
   CONFIG_FILE,
 } from "@kud/jenkins"
 import { JenkinsClient } from "@kud/jenkins"
@@ -151,7 +152,7 @@ const getClient = async () => {
   }
   if (!merged.user || !merged.token) {
     console.error(
-      "Missing credentials. Provide --user/--token or config set (or set JENKINS_USER/JENKINS_TOKEN)",
+      "Missing credentials. Provide --user/--token or config set (or set JENKINS_USER/JENKINS_API_TOKEN)",
     )
     process.exit(1)
   }
@@ -232,12 +233,33 @@ program
         return
       }
       if (action === "list-servers") {
-        const servers = listServers()
-        console.log(servers)
+        console.log(
+          listServers().map(({ token, ...rest }) => ({
+            ...rest,
+            token: token ? "(set)" : "(unset)",
+          })),
+        )
+        return
+      }
+      // Distinct from list-servers: that reports what is stored on disk, this
+      // reports everything selectable by --server, including instances declared
+      // only in JENKINS_INSTANCES — which is where a multi-instance setup lives.
+      //
+      // Tokens are masked, never printed. listInstances() resolves credentials
+      // because callers need them to build a client; a listing command is read
+      // aloud, pasted into issues and captured in terminal scrollback, so the
+      // one thing it must never do is echo the secret it just resolved.
+      if (action === "instances") {
+        console.log(
+          listInstances().map(({ token, ...rest }) => ({
+            ...rest,
+            token: token ? "(set)" : "(unset)",
+          })),
+        )
         return
       }
       console.log(
-        "Usage: config set | show | add-server | use | remove-server | list-servers",
+        "Usage: config set | show | add-server | use | remove-server | list-servers | instances",
       )
     } catch (e) {
       formatError(e)

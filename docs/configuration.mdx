@@ -35,8 +35,9 @@ The config loader automatically:
 | ----------------------------- | --------------------- | ----------------------- |
 | `JENKINS_URL`                 | Base URL override     | Same as `--url`         |
 | `JENKINS_USER`                | Username override     |                         |
-| `JENKINS_TOKEN`               | Token override        |                         |
-| `JENKINS_SERVER`              | Server alias          | Chosen from config file |
+| `JENKINS_API_TOKEN`           | API token override    |                         |
+| `JENKINS_INSTANCES`           | Instance names        | Comma/pipe separated    |
+| `JENKINS_SERVER`              | Instance/server alias | Env instances or config |
 | `JENKINS_TIMEOUT`             | Request timeout (ms)  | Default 15000           |
 | `JENKINS_RETRIES`             | Retry attempts (0–9)  | Default 0               |
 | `JENKINS_CLI_NO_ICONS`        | Disable Unicode/emoji | Plain text tokens       |
