@@ -1,7 +1,23 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import chalk from "chalk"
-import { formatPipelineGraph } from "../src/format.js"
+
+// src/format.ts decides ASCII-vs-Unicode once, at import time, and treats $CI as
+// a reason to fall back. These tests assert the Unicode rendering, so on any CI
+// runner they asserted against output the formatter cannot produce — which is
+// why this suite failed on every push for a month while Release stayed green.
+// Clear the triggers first, and import dynamically so the ordering is certain.
+for (const key of [
+  "CI",
+  "JENKINS_CLI_NO_ICONS",
+  "JENKINS_CLI_PLAIN",
+  "TERM_PROGRAM",
+]) {
+  delete process.env[key]
+}
+if (process.env.TERM === "dumb") delete process.env.TERM
+
+const { formatPipelineGraph } = await import("../src/format.js")
 
 const sample = {
   status: "FAILED",
