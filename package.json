@@ -49,8 +49,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@kud/jenkins": "2.0.0",
-    "@kud/jenkins-ink": "0.3.0",
+    "@kud/jenkins": "2.1.0",
+    "@kud/jenkins-ink": "0.4.0",
     "@kud/ink-ui": "0.6.0",
     "chalk": "5.6.2",
     "commander": "14.0.0",
