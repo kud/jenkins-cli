@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## 2.1.0 — 2026-09-14
+
+### Highlights
+
+- **One navigation contract.** `q` quits from anywhere except while typing in a search or number mode; `esc` closes the overlay, confirm or text mode on top and nothing more. Built on `@kud/ink-ui` 0.27's `useAppKeys` and `@kud/jenkins-ink` 0.5, whose body no longer binds `q` itself. ([874ef8f](https://github.com/kud/jenkins-cli/commit/874ef8f881cf6f764ceedc1677054bee7aa3faa2))
+
+---
+
 ## 1.3.0 — 2026-07-08
 
 ### Highlights
