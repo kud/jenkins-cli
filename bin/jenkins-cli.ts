@@ -23,7 +23,9 @@ import {
   formatJobList,
   formatJobTree,
   formatPipelineGraph,
+  formatChildJobs,
 } from "../src/format.js"
+import { resolveListTarget } from "../src/list-target.js"
 import { normalizeUrl, ensureScheme, parseBuildSpecifier } from "@kud/jenkins"
 import { withSpinner, createSpinner } from "../src/spinner.js"
 
@@ -635,7 +637,7 @@ program
 program
   .command("list [jobOrUrl]")
   .description(
-    "List top-level jobs (no argument; --all to recurse into folders), or recent builds for a job (by name or URL)",
+    "List top-level jobs (no argument; --all to recurse into folders),, recent builds for a job, or the child jobs of a folder or multibranch job (by name or URL)",
   )
   .option("-l, --limit <n>", "Limit results")
   .option(
@@ -648,8 +650,8 @@ program
       const client = await getClient()
       const jsonFlag = program.opts().json
       // No target => list jobs. Default is top-level only (one request); --all
-      // walks the whole tree. With a target => builds for that job (default
-      // 10), preserving the original single-job behaviour.
+      // walks the whole tree. With a target => child jobs for a folder or
+      // builds for a leaf job, decided in resolveListTarget.
       if (!jobOrUrl) {
         const limit = cmd.limit ? parseInt(cmd.limit, 10) : 0
         let jobs
@@ -686,14 +688,22 @@ program
         return
       }
       const spec = parseBuildSpecifier(jobOrUrl)
-      const limit = cmd.limit ? parseInt(cmd.limit, 10) : 10
-      const builds = await withSpinner("Fetching builds…", () =>
-        client.listBuilds(spec.job, limit),
+      const limit = cmd.limit ? parseInt(cmd.limit, 10) : undefined
+      const target = await withSpinner("Fetching…", () =>
+        resolveListTarget(client, spec.job, { limit }),
       )
+      if (target.kind === "folder") {
+        if (jsonFlag) {
+          console.log(JSON.stringify(target.children, null, 2))
+        } else {
+          console.log(formatChildJobs(target.children, { color: useColor() }))
+        }
+        return
+      }
       if (jsonFlag) {
-        console.log(JSON.stringify(builds, null, 2))
+        console.log(JSON.stringify(target.builds, null, 2))
       } else {
-        console.log(formatBuildList(builds, { pretty: useColor() }))
+        console.log(formatBuildList(target.builds, { pretty: useColor() }))
       }
     } catch (e) {
       formatError(e)

@@ -259,6 +259,42 @@ export function formatJobTree(jobs, { color = false } = {}) {
   return lines.join("\n")
 }
 
+// State shown for a child job: the last build's result when known, else
+// Jenkins' colour ball. `_anime`/` anime` are Jenkins' "still running" suffix.
+const COLOUR_STATE: Record<string, string> = {
+  blue: "SUCCESS",
+  red: "FAILURE",
+  yellow: "UNSTABLE",
+  aborted: "ABORTED",
+  disabled: "DISABLED",
+  notbuilt: "NOT_BUILT",
+}
+
+const childState = (child) => {
+  const anime = /anime/.test(String(child.color || ""))
+  const result = child.lastBuild?.result
+  if (result) return result
+  if (anime) return "RUNNING"
+  const base = String(child.color || "").split(/[_ ]/)[0]
+  return (base && (COLOUR_STATE[base] || base.toUpperCase())) || "NOT_BUILT"
+}
+
+// One row per child of a folder/multibranch target: folder-flagged name (same
+// jobLabel convention as formatJobList), state, and last build number when any.
+export function formatChildJobs(jobs, { color = false } = {}) {
+  return jobs
+    .map((j) =>
+      [
+        jobLabel(j.fullName || j.name || "", isFolder(j), color),
+        color ? statusColor(childState(j)) : childState(j),
+        j.lastBuild?.number != null ? `#${j.lastBuild.number}` : "",
+      ]
+        .filter(Boolean)
+        .join("\t"),
+    )
+    .join("\n")
+}
+
 export function formatError(err) {
   if (err && (err.status === 401 || err.status === 403)) {
     console.error("Auth error (check user/token permissions)")
