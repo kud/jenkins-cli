@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## 2.2.0 — 2026-10-27
+
+### Highlights
+
+- `list` on a folder or multibranch job now shows its child jobs, such as `acme/api-gateway/PR-123`. An empty folder or a never-built job prints nothing and exits 0. ([86617be](https://github.com/kud/jenkins-cli/commit/86617be89140844ea4ce08c32f81afbea04b7583))
+- `trigger` and `build` take a repeatable `--param KEY=VALUE` and a `--defaults` flag, and send the request to `buildWithParameters`. ([0fe0181](https://github.com/kud/jenkins-cli/commit/0fe0181d595cfab259dda29b3d1d3d53313746c8))
+- On a parameterised job, a missing parameter is refused with each one listed alongside its default, and unknown keys are refused rather than silently ignored. ([0fe0181](https://github.com/kud/jenkins-cli/commit/0fe0181d595cfab259dda29b3d1d3d53313746c8))
+
+---
+
 ## 2.1.0 — 2026-09-14
 
 ### Highlights
