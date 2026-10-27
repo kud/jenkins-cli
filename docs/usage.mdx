@@ -5,25 +5,26 @@ description: "Scriptable command reference — the cheat sheet, non-interactive 
 
 ## 📋 Cheat Sheet
 
-| Task                | Command                                       | Notes                                    |
-| ------------------- | --------------------------------------------- | ---------------------------------------- |
-| Latest build status | `jenkins status job`                          | Add `--pretty` for coloured state + icon |
-| List builds         | `jenkins list job -l 15`                      | Uses latest N builds                     |
-| Stream logs         | `jenkins logs job -f`                         | Progressive API polling                  |
-| Static logs JSON    | `jenkins logs job --json`                     | Outputs `{ text }`                       |
-| Trigger build       | `jenkins trigger job`                         | Plain trigger (no params)                |
-| Param build         | `jenkins build job --param KEY=V --param X=Y` | Repeat flag                              |
-| Stop build          | `jenkins stop job 456`                        | Aborts running build                     |
-| Artifacts list      | `jenkins artifacts job 456`                   | Tab separated list                       |
-| Download artifacts  | `jenkins artifacts job 456 -o out/`           | All artifacts                            |
-| Filter artifacts    | `jenkins artifacts job 456 -p .jar`           | Simple substring                         |
-| Test summary        | `jenkins test-report job 456`                 | Add `--json` for details                 |
-| Pipeline stages     | `jenkins stages job 456`                      | Needs workflow-api plugin                |
-| Queue list          | `jenkins queue`                               | Items with flags                         |
-| Cancel queue        | `jenkins queue-cancel 123`                    | Immediate POST                           |
-| Search jobs         | `jenkins search api -l 200`                   | BFS substring matching                   |
-| Single-job TUI      | `jenkins ui job`                              | Build list + logs                        |
-| Multi-job TUI       | `jenkins interactive`                         | Jobs + builds + logs                     |
+| Task                | Command                                       | Notes                                           |
+| ------------------- | --------------------------------------------- | ----------------------------------------------- |
+| Latest build status | `jenkins status job`                          | Add `--pretty` for coloured state + icon        |
+| List builds         | `jenkins list job -l 15`                      | Uses latest N builds                            |
+| Stream logs         | `jenkins logs job -f`                         | Progressive API polling                         |
+| Static logs JSON    | `jenkins logs job --json`                     | Outputs `{ text }`                              |
+| Trigger build       | `jenkins trigger job`                         | Param jobs need every `--param` or `--defaults` |
+| Trigger param job   | `jenkins trigger job --defaults`              | Jenkins fills unpassed params                   |
+| Param build         | `jenkins build job --param KEY=V --param X=Y` | Same rules as `trigger`                         |
+| Stop build          | `jenkins stop job 456`                        | Aborts running build                            |
+| Artifacts list      | `jenkins artifacts job 456`                   | Tab separated list                              |
+| Download artifacts  | `jenkins artifacts job 456 -o out/`           | All artifacts                                   |
+| Filter artifacts    | `jenkins artifacts job 456 -p .jar`           | Simple substring                                |
+| Test summary        | `jenkins test-report job 456`                 | Add `--json` for details                        |
+| Pipeline stages     | `jenkins stages job 456`                      | Needs workflow-api plugin                       |
+| Queue list          | `jenkins queue`                               | Items with flags                                |
+| Cancel queue        | `jenkins queue-cancel 123`                    | Immediate POST                                  |
+| Search jobs         | `jenkins search api -l 200`                   | BFS substring matching                          |
+| Single-job TUI      | `jenkins ui job`                              | Build list + logs                               |
+| Multi-job TUI       | `jenkins interactive`                         | Jobs + builds + logs                            |
 
 ## 🤖 Non-Interactive Patterns
 

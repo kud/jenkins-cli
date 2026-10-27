@@ -28,6 +28,7 @@ import {
 import { resolveListTarget } from "../src/list-target.js"
 import { normalizeUrl, ensureScheme, parseBuildSpecifier } from "@kud/jenkins"
 import { withSpinner, createSpinner } from "../src/spinner.js"
+import { parseParams, triggerJob } from "../src/trigger-plan.js"
 
 // Colour is on by default when stdout is an interactive terminal, and off when
 // piped, in JSON mode, when NO_COLOR is set, or via --no-color — so scripts and
@@ -369,64 +370,68 @@ program
     }
   })
 
-program
+// No default on the option, so help does not print "(default: [])"; the first
+// --param therefore arrives with no previous array.
+const parseParamArg = (v: string, p: string[] = []) => [...p, v]
+
+const withParamOptions = (cmd: Command) =>
+  cmd
+    .option(
+      "--param <k=v>",
+      "Parameter as KEY=VALUE (repeatable)",
+      parseParamArg,
+    )
+    .option(
+      "--defaults",
+      "Let Jenkins fill parameters not passed here from its own defaults",
+    )
+
+const triggerCommand = program
   .command("trigger <jobOrUrl>")
   .description(
-    "Trigger a new build by job or job URL (use build --param for parameters)",
+    "Trigger a new build by job or job URL (parameterised jobs: pass every --param KEY=VALUE, or use --defaults)",
   )
-  .action(async (jobOrUrl) => {
-    try {
-      const spec = parseBuildSpecifier(jobOrUrl)
-      if (spec.type === "build-url") {
-        console.error(
-          "Cannot trigger using a specific build URL; supply job or job URL.",
-        )
-        process.exit(1)
-      }
-      const client = await getClient()
-      const res = await client.triggerBuild(spec.job)
-      console.log(res)
-    } catch (e) {
-      formatError(e)
-      process.exit(1)
-    }
-  })
 
-program
+const buildCommand = program
   .command("build <job>")
-  .description("Trigger a build, optionally with parameters (repeat --param)")
-  .option(
-    "--param <k=v>",
-    "Parameter (repeatable)",
-    (v, p) => {
-      p.push(v)
-      return p
-    },
-    [],
+  .description(
+    "Trigger a build (parameterised jobs: pass every --param KEY=VALUE, or use --defaults)",
   )
-  .action(async (job, cmd) => {
-    try {
-      const client = await getClient()
-      const params = {}
-      for (const kv of cmd.param) {
-        const idx = kv.indexOf("=")
-        if (idx === -1) {
-          console.error("Param must be key=value: " + kv)
-          process.exit(1)
-        }
-        const k = kv.slice(0, idx)
-        const v = kv.slice(idx + 1)
-        params[k] = v
-      }
-      const res = Object.keys(params).length
-        ? await client.triggerBuildWithParameters(job, params)
-        : await client.triggerBuild(job)
-      console.log(res)
-    } catch (e) {
-      formatError(e)
+
+withParamOptions(triggerCommand).action(async (jobOrUrl, cmd) => {
+  try {
+    const spec = parseBuildSpecifier(jobOrUrl)
+    if (spec.type === "build-url") {
+      console.error(
+        "Cannot trigger using a specific build URL; supply job or job URL.",
+      )
       process.exit(1)
     }
-  })
+    const client = await getClient()
+    const params = parseParams(cmd.param ?? [])
+    const res = await triggerJob(client, spec.job, params, {
+      defaults: cmd.defaults,
+    })
+    console.log(res)
+  } catch (e) {
+    formatError(e)
+    process.exit(1)
+  }
+})
+
+withParamOptions(buildCommand).action(async (job, cmd) => {
+  try {
+    const client = await getClient()
+    const params = parseParams(cmd.param ?? [])
+    const res = await triggerJob(client, job, params, {
+      defaults: cmd.defaults,
+    })
+    console.log(res)
+  } catch (e) {
+    formatError(e)
+    process.exit(1)
+  }
+})
 
 program
   .command("stop <job> <buildNumber>")
