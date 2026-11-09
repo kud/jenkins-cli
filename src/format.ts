@@ -704,11 +704,24 @@ export function formatDiagnosis(d, { color = false } = {}) {
     if (stage.steps.length === 0) out.push(c.dim("  (no step details)"))
     for (const step of stage.steps) {
       out.push(`${c.bold("step")}  ${step.name}  ${tone(step.status)}`)
+      const of = step.logLineCount
+        ? ` of ${step.logLineCount.toLocaleString("en-GB")}`
+        : ""
+      for (const block of step.errorLines ?? []) {
+        out.push(c.dim(`  line ${block.line.toLocaleString("en-GB")}${of}`))
+        out.push(...block.text.map((l) => `    ${l}`))
+      }
+      if (step.errorLines && step.errorLines.length === 0)
+        out.push(c.dim("  no error lines found in the step log"))
       const tail = (step.logTail || "").replace(/\s+$/, "")
-      if (tail) out.push(...tail.split("\n").map((l) => `  ${l}`))
+      if (tail) {
+        out.push(c.dim("  last lines"))
+        out.push(...tail.split("\n").map((l) => `    ${l}`))
+      }
     }
   }
 
+  if (!d.tests) out.push("", c.dim("no test report for this build"))
   if (d.tests) {
     out.push(
       "",
