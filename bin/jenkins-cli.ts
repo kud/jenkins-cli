@@ -522,6 +522,7 @@ program
     "Why a build failed: failing stages with their step's log tail, plus failed tests; omit build (or pass 'latest') for the most recent",
   )
   .option("-n, --lines <n>", "Log lines to keep per failing step", "80")
+  .option("-t, --tail", "Show the log tail even when error lines were found")
   .action(async (job, build, cmd) => {
     try {
       const client = await getClient()
@@ -538,7 +539,7 @@ program
         }),
       )
       if (program.opts().json) console.log(JSON.stringify(d, null, 2))
-      else console.log(formatDiagnosis(d, { color: useColor() }))
+      else console.log(formatDiagnosis(d, { color: useColor(), tail: !!cmd.tail }))
     } catch (e) {
       formatError(e)
       process.exit(1)

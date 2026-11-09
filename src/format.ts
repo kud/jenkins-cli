@@ -687,7 +687,20 @@ export function formatLogsChunk(chunk) {
 
 // `jenkins why`: the failing stages and tests of one build, read top to bottom.
 // Plain text when colour is off so a script or a log file gets the same facts.
-export function formatDiagnosis(d, { color = false } = {}) {
+// Stages that carry no failure of their own: Jenkins marks a stage skipped
+// after an earlier failure, and an "Error signal" step only raises UNSTABLE.
+const SKIPPED = /skipped due to earlier failure/
+const isSkipped = (stage) =>
+  stage.steps.length > 0 &&
+  stage.steps.every((s) => s.status !== "FAILED" && SKIPPED.test(s.logTail || ""))
+const errorSignal = (stage) =>
+  stage.steps.length === 1 && /^error signal$/i.test(stage.steps[0].name)
+    ? stage.steps[0]
+    : null
+const lastLine = (text = "") =>
+  text.split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? ""
+
+export function formatDiagnosis(d, { color = false, tail = false } = {}) {
   const c = color
     ? { bad: chalk.red, warn: chalk.yellow, dim: chalk.dim, bold: chalk.bold }
     : { bad: (s) => s, warn: (s) => s, dim: (s) => s, bold: (s) => s }
@@ -699,7 +712,18 @@ export function formatDiagnosis(d, { color = false } = {}) {
   )
   if (d.url) out.push(c.dim(d.url))
 
+  const skipped = d.failedStages.filter(isSkipped)
   for (const stage of d.failedStages) {
+    if (skipped.includes(stage)) continue
+    const signal = errorSignal(stage)
+    if (signal) {
+      const why = lastLine(signal.logTail)
+      out.push(
+        "",
+        `${c.bold("stage")} ${stage.name}  ${tone(stage.status)}  ${c.dim(`error signal${why ? `: ${why}` : ""}`)}`,
+      )
+      continue
+    }
     out.push("", `${c.bold("stage")} ${stage.name}  ${tone(stage.status)}`)
     if (stage.steps.length === 0) out.push(c.dim("  (no step details)"))
     for (const step of stage.steps) {
@@ -715,13 +739,24 @@ export function formatDiagnosis(d, { color = false } = {}) {
       }
       if (step.errorLines && step.errorLines.length === 0)
         out.push(c.dim("  no error lines found in the step log"))
-      const tail = (step.logTail || "").replace(/\s+$/, "")
-      if (tail) {
+      // Error blocks already show what failed; the tail would mostly repeat
+      // them under whatever the step printed afterwards.
+      const found = (step.errorLines?.length ?? 0) > 0
+      const tailText = (step.logTail || "").replace(/\s+$/, "")
+      if (tailText && found && !tail)
+        out.push(c.dim("  last lines hidden (--tail to show)"))
+      else if (tailText) {
         out.push(c.dim("  last lines"))
-        out.push(...tail.split("\n").map((l) => `    ${l}`))
+        out.push(...tailText.split("\n").map((l) => `    ${l}`))
       }
     }
   }
+
+  if (skipped.length)
+    out.push(
+      "",
+      c.dim(`skipped (earlier failure): ${skipped.map((s) => s.name).join(", ")}`),
+    )
 
   if (!d.tests) out.push("", c.dim("no JUnit report for this build"))
   if (d.tests) {
