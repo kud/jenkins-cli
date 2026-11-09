@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 ---
 
+## 2.5.0 — 2026-11-09
+
+### Highlights
+
+- `jenkins why` prints a `report <url>` line under a failing step whose log names a report (`Report Link: …`). That helps with test runners that only print a summary and a link. ([e5070d4](https://github.com/kud/jenkins-cli/commit/e5070d42f38bef8c78137c584c3e95c96c5c6bee))
+- Runner summaries such as "Some tests failed." now count as error lines, so they surface in the scan. ([e5070d4](https://github.com/kud/jenkins-cli/commit/e5070d42f38bef8c78137c584c3e95c96c5c6bee))
+- The test count is now labelled `junit`. When JUnit shows 0 failed but stages failed, `why` says "the failing stages above are not in this report". ([e5070d4](https://github.com/kud/jenkins-cli/commit/e5070d42f38bef8c78137c584c3e95c96c5c6bee))
+- "no JUnit report for this build" replaces "no test report", so the source is explicit. ([e5070d4](https://github.com/kud/jenkins-cli/commit/e5070d42f38bef8c78137c584c3e95c96c5c6bee))
+
+<details>
+<summary>Internal (1 commit)</summary>
+
+- Bumped `@kud/jenkins` to 2.4.0 and updated tests for the renamed labels and report links.
+
+</details>
+
+---
+
 ## 2.4.0 — 2026-11-09
 
 ### Highlights
