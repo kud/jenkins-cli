@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## 2.4.0 — 2026-11-09
+
+### Highlights
+
+- `jenkins why` now scans the whole failing step log and shows the error-looking lines first, each with its position ("line 310 of 1,840") and two lines of context. The real error surfaces even when the log ends in artefact-upload noise. ([6ae6083](https://github.com/kud/jenkins-cli/commit/6ae6083bcd6574b018608254b34ef7ea218a3108))
+- The log tail still follows, now labelled "last lines". When the scan finds nothing, `why` says "no error lines found in the step log". ([6ae6083](https://github.com/kud/jenkins-cli/commit/6ae6083bcd6574b018608254b34ef7ea218a3108))
+- A build with no test report now prints "no test report for this build" instead of nothing. ([6ae6083](https://github.com/kud/jenkins-cli/commit/6ae6083bcd6574b018608254b34ef7ea218a3108))
+
+---
+
 ## 2.3.0 — 2026-11-09
 
 ### Highlights
