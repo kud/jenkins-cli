@@ -18,6 +18,7 @@
 - **Artifact management** — list, filter by pattern, and download build artifacts to a local directory
 - **Multi-server profiles** — store named server aliases with separate credentials and switch between them at any time
 - **Pipeline stages** — fetch stage-by-stage breakdown of workflow builds via the workflow-api plugin
+- **Failure diagnosis** — `why` shows each failing stage with the tail of its failing step's log, plus the first failed tests, without paging through the whole console
 - **Scriptable output** — every command supports `--json` for raw API data and `--pretty` for colourised terminal output
 
 ## Install

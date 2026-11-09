@@ -24,6 +24,7 @@ import {
   formatJobTree,
   formatPipelineGraph,
   formatChildJobs,
+  formatDiagnosis,
 } from "../src/format.js"
 import { resolveListTarget } from "../src/list-target.js"
 import { normalizeUrl, ensureScheme, parseBuildSpecifier } from "@kud/jenkins"
@@ -509,6 +510,35 @@ program
             console.log(`... (${rep.suites.length - 5} more suites)`)
         }
       }
+    } catch (e) {
+      formatError(e)
+      process.exit(1)
+    }
+  })
+
+program
+  .command("why <job> [build]")
+  .description(
+    "Why a build failed: failing stages with their step's log tail, plus failed tests; omit build (or pass 'latest') for the most recent",
+  )
+  .option("-n, --lines <n>", "Log lines to keep per failing step", "80")
+  .action(async (job, build, cmd) => {
+    try {
+      const client = await getClient()
+      const ref =
+        !build || build === "latest"
+          ? undefined
+          : /^\d+$/.test(build)
+            ? Number(build)
+            : build
+      const lines = Number.parseInt(cmd.lines, 10)
+      const d = await withSpinner("Diagnosing build…", () =>
+        client.diagnoseBuild(job, ref, {
+          lines: Number.isFinite(lines) && lines > 0 ? lines : 80,
+        }),
+      )
+      if (program.opts().json) console.log(JSON.stringify(d, null, 2))
+      else console.log(formatDiagnosis(d, { color: useColor() }))
     } catch (e) {
       formatError(e)
       process.exit(1)

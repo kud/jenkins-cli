@@ -19,6 +19,7 @@ description: "Scriptable command reference — the cheat sheet, non-interactive 
 | Download artifacts  | `jenkins artifacts job 456 -o out/`           | All artifacts                                   |
 | Filter artifacts    | `jenkins artifacts job 456 -p .jar`           | Simple substring                                |
 | Test summary        | `jenkins test-report job 456`                 | Add `--json` for details                        |
+| Why it failed       | `jenkins why job 456`                         | Failing stages, log tail, failed tests          |
 | Pipeline stages     | `jenkins stages job 456`                      | Needs workflow-api plugin                       |
 | Queue list          | `jenkins queue`                               | Items with flags                                |
 | Cancel queue        | `jenkins queue-cancel 123`                    | Immediate POST                                  |
@@ -85,6 +86,7 @@ jenkins artifacts my-job 128 -p .jar -o jars/
 ```bash
 jenkins queue                 # List queued tasks
 jenkins queue-cancel 1234     # Cancel item
+jenkins why my-job            # Why the latest build failed: stages, log tail, tests
 jenkins stages my-job 456     # Pipeline stages (needs workflow-api plugin)
 jenkins test-report my-job 456 --json  # Full JUnit JSON structure
 ```

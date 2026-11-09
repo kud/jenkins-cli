@@ -684,3 +684,47 @@ export function formatLogsChunk(chunk) {
     })
     .join("\n")
 }
+
+// `jenkins why`: the failing stages and tests of one build, read top to bottom.
+// Plain text when colour is off so a script or a log file gets the same facts.
+export function formatDiagnosis(d, { color = false } = {}) {
+  const c = color
+    ? { bad: chalk.red, warn: chalk.yellow, dim: chalk.dim, bold: chalk.bold }
+    : { bad: (s) => s, warn: (s) => s, dim: (s) => s, bold: (s) => s }
+  const tone = (s) => (s === "UNSTABLE" ? c.warn(s) : c.bad(s))
+  const out: string[] = []
+
+  out.push(
+    `${c.bold(`${d.job} #${d.build}`)}  ${d.result ? tone(d.result) : c.dim("RUNNING")}`,
+  )
+  if (d.url) out.push(c.dim(d.url))
+
+  for (const stage of d.failedStages) {
+    out.push("", `${c.bold("stage")} ${stage.name}  ${tone(stage.status)}`)
+    if (stage.steps.length === 0) out.push(c.dim("  (no step details)"))
+    for (const step of stage.steps) {
+      out.push(`${c.bold("step")}  ${step.name}  ${tone(step.status)}`)
+      const tail = (step.logTail || "").replace(/\s+$/, "")
+      if (tail) out.push(...tail.split("\n").map((l) => `  ${l}`))
+    }
+  }
+
+  if (d.tests) {
+    out.push(
+      "",
+      `${c.bold("tests")} ${d.tests.failed} failed of ${d.tests.total}`,
+    )
+    for (const t of d.tests.first) {
+      out.push(`  ${c.bad("✗")} ${t.name}`)
+      if (t.error) out.push(`    ${t.error.split("\n")[0]}`)
+    }
+    const more = d.tests.failed - d.tests.first.length
+    if (more > 0) out.push(c.dim(`  … ${more} more`))
+  }
+
+  if (d.failedStages.length === 0 && !d.tests?.failed)
+    out.push("", c.dim("no failing stage or test found"))
+  for (const h of d.hints) out.push(c.dim(`hint: ${h}`))
+
+  return out.join("\n")
+}
