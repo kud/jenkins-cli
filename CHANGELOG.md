@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 
 ---
 
+## 2.3.0 — 2026-11-09
+
+### Highlights
+
+- New `jenkins why <job> [build]` shows each failing stage with the tail of its failing step's log and the first failed tests, instead of a whole console. Take `--json` for scripts, `-n` for tail length (default 80 lines, 16 KB cap). ([f6cbc3f](https://github.com/kud/jenkins-cli/commit/f6cbc3f0a51aeae19d33dd55eab678d30a7a19f8))
+- Multibranch branches with a `/` in their name, such as `acme/api-gateway/feature/login`, now resolve. ([f6cbc3f](https://github.com/kud/jenkins-cli/commit/f6cbc3f0a51aeae19d33dd55eab678d30a7a19f8))
+- In the interactive UI, `/` now filters the jobs and builds panes live. The old `b`/`B` build-filter keys are gone. ([f6cbc3f](https://github.com/kud/jenkins-cli/commit/f6cbc3f0a51aeae19d33dd55eab678d30a7a19f8))
+
+<details>
+<summary>Internal (1 commit)</summary>
+
+- Bumped `@kud/jenkins` to 2.2.0 and `@kud/jenkins-ink` to 0.6.0, and added tests and docs for `why`.
+
+</details>
+
+---
+
 ## 2.2.0 — 2026-10-27
 
 ### Highlights
