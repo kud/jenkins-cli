@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## 2.6.1 — 2026-11-09
+
+### Fixes
+
+- `jenkins why` now lists skipped stages under `skipped (earlier failure)` even when Jenkins reports them as FAILED because a wrapper step ran first. ([8dbee74](https://github.com/kud/jenkins-cli/commit/8dbee74a446eeea04f5ff9549ecd60e0470a9359))
+
+---
+
 ## 2.6.0 — 2026-11-09
 
 ### Highlights
