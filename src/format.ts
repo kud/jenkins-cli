@@ -707,6 +707,8 @@ export function formatDiagnosis(d, { color = false } = {}) {
       const of = step.logLineCount
         ? ` of ${step.logLineCount.toLocaleString("en-GB")}`
         : ""
+      for (const link of step.reportLinks ?? [])
+        out.push(`  ${c.bold("report")} ${link}`)
       for (const block of step.errorLines ?? []) {
         out.push(c.dim(`  line ${block.line.toLocaleString("en-GB")}${of}`))
         out.push(...block.text.map((l) => `    ${l}`))
@@ -721,12 +723,16 @@ export function formatDiagnosis(d, { color = false } = {}) {
     }
   }
 
-  if (!d.tests) out.push("", c.dim("no test report for this build"))
+  if (!d.tests) out.push("", c.dim("no JUnit report for this build"))
   if (d.tests) {
     out.push(
       "",
-      `${c.bold("tests")} ${d.tests.failed} failed of ${d.tests.total}`,
+      `${c.bold("junit")} ${d.tests.failed} failed of ${d.tests.total}`,
     )
+    // A stage can fail outside JUnit (remote runners, scripts); say so rather
+    // than let "0 failed" read as a clean build.
+    if (d.tests.failed === 0 && d.failedStages.length > 0)
+      out.push(c.dim("  the failing stages above are not in this report"))
     for (const t of d.tests.first) {
       out.push(`  ${c.bad("✗")} ${t.name}`)
       if (t.error) out.push(`    ${t.error.split("\n")[0]}`)

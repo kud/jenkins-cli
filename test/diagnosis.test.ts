@@ -48,11 +48,11 @@ test("formatDiagnosis shows error blocks before the last lines", () => {
     out,
     /step  Shell Script  FAILED\n  line 310 of 1,840\n {6}✘ checkout applies the coupon\n[\s\S]*Missing cart state[\s\S]*\n  last lines\n    Uploaded report/,
   )
-  assert.match(out, /tests 3 failed of 40/)
+  assert.match(out, /junit 3 failed of 40/)
   assert.match(out, /Cart\.totals\n    expected 3 to equal 4\n/)
   assert.match(out, /… 2 more/)
   assert.match(out, /hint: build still running$/)
-  assert.doesNotMatch(out, /no test report/)
+  assert.doesNotMatch(out, /no JUnit report/)
 })
 
 test("formatDiagnosis says when a scan found nothing and there is no test report", () => {
@@ -63,10 +63,25 @@ test("formatDiagnosis says when a scan found nothing and there is no test report
     tests: null,
   })
   assert.match(out, /no error lines found in the step log/)
-  assert.match(out, /no test report for this build/)
+  assert.match(out, /no JUnit report for this build/)
 })
 
 test("formatDiagnosis says so when nothing failed", () => {
   const out = formatDiagnosis({ ...sample, result: "SUCCESS", failedStages: [], tests: null, hints: [] })
   assert.match(out, /no failing stage or test found/)
+})
+
+test("formatDiagnosis prints report links and flags failures outside JUnit", () => {
+  const step = {
+    ...sample.failedStages[0].steps[0],
+    errorLines: [{ line: 3, text: ["Some tests failed."] }],
+    reportLinks: ["https://reports.example.com/run/42/index.html"],
+  }
+  const out = formatDiagnosis({
+    ...sample,
+    failedStages: [{ ...sample.failedStages[0], steps: [step] }],
+    tests: { failed: 0, total: 5306, first: [] },
+  })
+  assert.match(out, /step  Shell Script  FAILED\n  report https:\/\/reports\.example\.com\/run\/42\/index\.html\n  line 3 of 1,840/)
+  assert.match(out, /junit 0 failed of 5306\n  the failing stages above are not in this report/)
 })
