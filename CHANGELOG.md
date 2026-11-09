@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ---
 
+## 2.6.0 — 2026-11-09
+
+### Highlights
+
+- `jenkins why` is much shorter on a failing build: one real failure went from 83 lines of output to about 15. ([f9beb59](https://github.com/kud/jenkins-cli/commit/f9beb5947df366a54233e446588e917949356b4b))
+- When error lines were found, the log tail is hidden ("last lines hidden (--tail to show)") instead of repeating them under upload noise. The new `-t, --tail` shows it anyway. ([f9beb59](https://github.com/kud/jenkins-cli/commit/f9beb5947df366a54233e446588e917949356b4b))
+- Stages Jenkins skipped after an earlier failure collapse to one line, such as `skipped (earlier failure): Deploy, Smoke tests`. ([f9beb59](https://github.com/kud/jenkins-cli/commit/f9beb5947df366a54233e446588e917949356b4b))
+- An UNSTABLE stage whose only step is an "Error signal" prints as one line with the signal's last log line. ([f9beb59](https://github.com/kud/jenkins-cli/commit/f9beb5947df366a54233e446588e917949356b4b))
+
+---
+
 ## 2.5.0 — 2026-11-09
 
 ### Highlights
