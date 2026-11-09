@@ -112,3 +112,22 @@ test("skipped stages collapse to one line, error-signal stages to one line each"
   assert.doesNotMatch(out, /stage Deploy/)
   assert.equal(out.match(/no error lines found/g), null)
 })
+
+test("a FAILED stage with only a successful wrapper step after a real failure counts as skipped", () => {
+  const wrapperOnly = (name) => ({
+    name,
+    status: "FAILED",
+    steps: [{ name: "Load pipeline context", status: "SUCCESS", logTail: "context loaded\n", errorLines: [], logLineCount: 1, reportLinks: [] }],
+  })
+  const out = formatDiagnosis({
+    ...sample,
+    failedStages: [sample.failedStages[0], wrapperOnly("Deploy to staging"), wrapperOnly("Smoke tests")],
+  })
+  assert.match(out, /skipped \(earlier failure\): Deploy to staging, Smoke tests/)
+  assert.doesNotMatch(out, /stage Deploy to staging/)
+
+  // With no earlier failure it is shown in full: nothing explains it.
+  const alone = formatDiagnosis({ ...sample, failedStages: [wrapperOnly("Deploy to staging")] })
+  assert.match(alone, /stage Deploy to staging  FAILED/)
+  assert.doesNotMatch(alone, /skipped \(earlier failure\)/)
+})

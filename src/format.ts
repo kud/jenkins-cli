@@ -690,9 +690,29 @@ export function formatLogsChunk(chunk) {
 // Stages that carry no failure of their own: Jenkins marks a stage skipped
 // after an earlier failure, and an "Error signal" step only raises UNSTABLE.
 const SKIPPED = /skipped due to earlier failure/
-const isSkipped = (stage) =>
+const saysSkipped = (stage) =>
   stage.steps.length > 0 &&
   stage.steps.every((s) => s.status !== "FAILED" && SKIPPED.test(s.logTail || ""))
+// Jenkins also reports a skipped stage as FAILED when a wrapper step ran
+// before the body; the skip notice then sits only in the full console, which
+// we never download. Such a stage has only successful steps and no error lines,
+// and comes after a stage that really failed.
+const looksSkipped = (stage) =>
+  stage.status === "FAILED" &&
+  stage.steps.length > 0 &&
+  stage.steps.every(
+    (s) => s.status === "SUCCESS" && (s.errorLines?.length ?? 0) === 0,
+  )
+const findSkipped = (stages) => {
+  const skipped = []
+  let earlierFailure = false
+  for (const stage of stages) {
+    if (saysSkipped(stage) || (earlierFailure && looksSkipped(stage)))
+      skipped.push(stage)
+    else if (stage.status === "FAILED") earlierFailure = true
+  }
+  return skipped
+}
 const errorSignal = (stage) =>
   stage.steps.length === 1 && /^error signal$/i.test(stage.steps[0].name)
     ? stage.steps[0]
@@ -712,7 +732,7 @@ export function formatDiagnosis(d, { color = false, tail = false } = {}) {
   )
   if (d.url) out.push(c.dim(d.url))
 
-  const skipped = d.failedStages.filter(isSkipped)
+  const skipped = findSkipped(d.failedStages)
   for (const stage of d.failedStages) {
     if (skipped.includes(stage)) continue
     const signal = errorSignal(stage)
