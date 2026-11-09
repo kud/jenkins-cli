@@ -13,13 +13,12 @@
 
 ## Features
 
-- **Interactive TUI** — full-screen multi-job explorer with build list and live log streaming, built on neo-blessed
-- **Log streaming** — follow build console output in real time with `logs -f`; syntax-highlighted via highlight.js
-- **Artifact management** — list, filter by pattern, and download build artifacts to a local directory
-- **Multi-server profiles** — store named server aliases with separate credentials and switch between them at any time
-- **Pipeline stages** — fetch stage-by-stage breakdown of workflow builds via the workflow-api plugin
-- **Failure diagnosis** — `why` shows each failing stage with the tail of its failing step's log, plus the first failed tests, without paging through the whole console
-- **Scriptable output** — every command supports `--json` for raw API data and `--pretty` for colourised terminal output
+- **Failure diagnosis** — `jenkins why` explains a red build in one screen: each failing stage, the error lines pulled out of its step log, report links, skipped stages folded away
+- **Interactive TUI** — a full-screen explorer for jobs, builds and live logs
+- **Log streaming** — follow console output in real time, with syntax highlighting
+- **Artifacts** — list, filter and download build artifacts
+- **Multi-server profiles** — named servers with their own credentials, multibranch jobs included
+- **Scriptable** — every command takes `--json`
 
 ## Install
 
@@ -32,30 +31,32 @@ Binary: `jenkins` · Requires Node.js >= 22
 ## Usage
 
 ```console
-$ jenkins config set --url https://jenkins.example.com --user admin --token <api-token>
+$ jenkins why acme/api-gateway/feature/login
+acme/api-gateway/feature/login #12  FAILURE
+
+stage Image scan  UNSTABLE  error signal: 3 high vulnerabilities
+
+stage E2E tests  FAILED
+step  npm test  FAILED
+  line 1 of 15
+     FAIL  src/cart.test.ts > applies the coupon
+    Error: expected 3 to be 4
+
+    ⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯
+     Test Files  1 failed | 4 passed (5)
+    chmod 644 out/0
+  last lines hidden (--tail to show)
+
+skipped (earlier failure): Deploy
 
 $ jenkins status my-pipeline
 ✔ my-pipeline #42  SUCCESS  (2m 14s)
 
 $ jenkins logs my-pipeline --follow
-[Pipeline] Start of Pipeline
-[Pipeline] node
-...
-
-$ jenkins list my-pipeline --limit 5
-42  SUCCESS   2m 14s  2026-06-19
-41  FAILURE   1m 03s  2026-06-18
-40  SUCCESS   2m 08s  2026-06-17
-
-$ jenkins artifacts my-pipeline 42 --output ./downloads
-
-$ jenkins search deploy --limit 10
-deploy-prod
-deploy-staging
-deploy-preview
-
 $ jenkins interactive
 ```
+
+<!-- landing:skip -->
 
 ## Development
 
@@ -71,5 +72,7 @@ npm run dev
 | `npm run build` | Compile TypeScript to `dist/`        |
 | `npm run dev`   | Run directly via tsx (no build step) |
 | `npm test`      | Run Node.js built-in test runner     |
+
+<!-- landing:/skip -->
 
 📚 **Full documentation → [jenkins-cli/docs](https://kud.io/projects/jenkins-cli/docs)**
