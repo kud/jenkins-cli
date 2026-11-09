@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## 2.6.2 — 2026-11-09
+
+### Fixes
+
+- `jenkins why` now finds errors that test runners print in colour (a red `Error:`, a `FAIL` banner, `Failed Tests N`) instead of reporting "no error lines found", and shows the step's lines without colour codes. ([de75e46](https://github.com/kud/jenkins-cli/commit/de75e4604579e02372ef7894ae2644cf3d7541a6))
+
+---
+
 ## 2.6.1 — 2026-11-09
 
 ### Fixes
