@@ -30,6 +30,18 @@ import { resolveListTarget } from "../src/list-target.js"
 import { normalizeUrl, ensureScheme, parseBuildSpecifier } from "@kud/jenkins"
 import { withSpinner, createSpinner } from "../src/spinner.js"
 import { parseParams, triggerJob } from "../src/trigger-plan.js"
+import {
+  terminalCleaner,
+  buildOpenUrl,
+  openerCommand,
+  redactConfig,
+  redactRawConfig,
+  safeArtifactPath,
+} from "../src/safety.js"
+
+// Text from the Jenkins server is sanitised before it reaches a terminal; piped
+// output keeps the server's bytes. See src/safety.ts.
+const term = () => terminalCleaner(!!process.stdout.isTTY)
 
 // Colour is on by default when stdout is an interactive terminal, and off when
 // piped, in JSON mode, when NO_COLOR is set, or via --no-color — so scripts and
@@ -117,10 +129,13 @@ program.configureOutput({
 const getClient = async () => {
   const globalOpts = program.opts()
   if (globalOpts.debugConfig)
-    console.error("--- debug-config program.opts() ---", globalOpts)
+    console.error(
+      "--- debug-config program.opts() ---",
+      redactConfig(globalOpts),
+    )
   const fileConfig = loadConfig()
   if (globalOpts.debugConfig)
-    console.error("--- debug-config fileConfig ---", fileConfig)
+    console.error("--- debug-config fileConfig ---", redactConfig(fileConfig))
   const merged = resolveConfig({
     url: globalOpts.url,
     user: globalOpts.user,
@@ -137,9 +152,9 @@ const getClient = async () => {
         raw = "(missing)"
       }
       console.error("--- debug-config raw file ---")
-      console.error(raw)
+      console.error(raw === "(missing)" ? raw : redactRawConfig(raw))
       console.error("--- debug-config resolved ---")
-      console.error(merged)
+      console.error(redactConfig(merged))
       console.error("----------------------------")
     } catch (e) {
       console.error("debug-config error", e.message)
@@ -147,7 +162,7 @@ const getClient = async () => {
   }
   if (!merged.url) {
     if (globalOpts.debugConfig) {
-      console.error("DEBUG merged config missing url", merged)
+      console.error("DEBUG merged config missing url", redactConfig(merged))
     }
     console.error(
       "Missing Jenkins URL. Configure via config set or --url (or set JENKINS_URL)",
@@ -281,7 +296,7 @@ program
       const num = buildNumber || spec.buildNumber
       const client = await getClient()
       const text = await client.getConsoleText(job, num)
-      process.stdout.write(text)
+      process.stdout.write(term().text(text))
     } catch (e) {
       formatError(e)
       process.exit(1)
@@ -314,7 +329,7 @@ program
       if (jsonFlag) {
         console.log(JSON.stringify(build, null, 2))
       } else {
-        console.log(formatStatus(build, { pretty: useColor() }))
+        console.log(formatStatus(term().deep(build), { pretty: useColor() }))
       }
     } catch (e) {
       formatError(e)
@@ -358,7 +373,7 @@ program
             ),
           )
         } else {
-          process.stdout.write(text)
+          process.stdout.write(term().text(text))
         }
       } else {
         await client.streamConsole(job, num, (chunk) => {
@@ -413,7 +428,7 @@ withParamOptions(triggerCommand).action(async (jobOrUrl, cmd) => {
     const res = await triggerJob(client, spec.job, params, {
       defaults: cmd.defaults,
     })
-    console.log(res)
+    console.log(term().deep(res))
   } catch (e) {
     formatError(e)
     process.exit(1)
@@ -427,7 +442,7 @@ withParamOptions(buildCommand).action(async (job, cmd) => {
     const res = await triggerJob(client, job, params, {
       defaults: cmd.defaults,
     })
-    console.log(res)
+    console.log(term().deep(res))
   } catch (e) {
     formatError(e)
     process.exit(1)
@@ -441,7 +456,7 @@ program
     try {
       const client = await getClient()
       const res = await client.stopBuild(job, buildNumber)
-      console.log(res)
+      console.log(term().deep(res))
     } catch (e) {
       formatError(e)
       process.exit(1)
@@ -459,7 +474,7 @@ program
       if (jsonFlag) console.log(JSON.stringify(q, null, 2))
       else
         console.log(
-          (q.items || [])
+          (term().deep(q).items || [])
             .map(
               (i) =>
                 `${i.id}\t${i.task?.name || ""}\tblocked=${i.blocked} buildable=${i.buildable}`,
@@ -479,7 +494,7 @@ program
     try {
       const client = await getClient()
       const res = await client.cancelQueueItem(id)
-      console.log(res)
+      console.log(term().deep(res))
     } catch (e) {
       formatError(e)
       process.exit(1)
@@ -500,14 +515,15 @@ program
         const fail = rep.failCount
         const skip = rep.skipCount
         console.log(`# Tests: ${total}  Failed: ${fail}  Skipped: ${skip}`)
-        if (rep.suites) {
-          rep.suites
+        const suites = term().deep(rep.suites)
+        if (suites) {
+          suites
             .slice(0, 5)
             .forEach((s) =>
               console.log(`- ${s.name} ${s.cases?.length || 0} cases`),
             )
-          if (rep.suites.length > 5)
-            console.log(`... (${rep.suites.length - 5} more suites)`)
+          if (suites.length > 5)
+            console.log(`... (${suites.length - 5} more suites)`)
         }
       }
     } catch (e) {
@@ -539,7 +555,13 @@ program
         }),
       )
       if (program.opts().json) console.log(JSON.stringify(d, null, 2))
-      else console.log(formatDiagnosis(d, { color: useColor(), tail: !!cmd.tail }))
+      else
+        console.log(
+          formatDiagnosis(term().deep(d), {
+            color: useColor(),
+            tail: !!cmd.tail,
+          }),
+        )
     } catch (e) {
       formatError(e)
       process.exit(1)
@@ -568,16 +590,20 @@ program
       // place; when piped or in --json it falls through to a single render.
       if (cmd.watch && !jsonFlag && process.stdout.isTTY) {
         const { watchStages } = await import("../src/stages-watch.js")
-        await watchStages(() => client.getPipelineStages(job, ref), {
-          color: useColor(),
-          label: `${job}${ref ? ` #${ref}` : ""}`,
-        })
+        await watchStages(
+          () => client.getPipelineStages(job, ref).then(term().deep),
+          {
+            color: useColor(),
+            label: `${job}${ref ? ` #${ref}` : ""}`,
+          },
+        )
         return
       }
 
-      const data = await withSpinner("Fetching stages…", () =>
+      const raw = await withSpinner("Fetching stages…", () =>
         client.getPipelineStages(job, ref),
       )
+      const data = jsonFlag ? raw : term().deep(raw)
       if (jsonFlag) {
         console.log(JSON.stringify(data, null, 2))
       } else if (cmd.graph || cmd.watch) {
@@ -614,7 +640,8 @@ program
   .action(async (job) => {
     try {
       const client = await getClient()
-      const defs = await client.getJobParameters(job)
+      const rawDefs = await client.getJobParameters(job)
+      const defs = program.opts().json ? rawDefs : term().deep(rawDefs)
       if (program.opts().json) {
         console.log(JSON.stringify(defs, null, 2))
       } else if (!defs.length) {
@@ -642,14 +669,15 @@ program
   .action(async (job, buildNumber) => {
     try {
       const client = await getClient()
-      const info = await client.getBuildChanges(
+      const rawInfo = await client.getBuildChanges(
         job,
         buildNumber ? parseInt(buildNumber, 10) : undefined,
       )
       if (program.opts().json) {
-        console.log(JSON.stringify(info, null, 2))
+        console.log(JSON.stringify(rawInfo, null, 2))
         return
       }
+      const info = term().deep(rawInfo)
       console.log(`# Build #${info.number}`)
       if (info.causes.length) console.log(`Cause: ${info.causes.join("; ")}`)
       if (info.culprits.length)
@@ -718,8 +746,8 @@ program
         const asTree = cmd.all && !cmd.flat && !!process.stdout.isTTY
         console.log(
           asTree
-            ? formatJobTree(capped, { color })
-            : formatJobList(capped, { color }),
+            ? formatJobTree(term().deep(capped), { color })
+            : formatJobList(term().deep(capped), { color }),
         )
         return
       }
@@ -732,14 +760,20 @@ program
         if (jsonFlag) {
           console.log(JSON.stringify(target.children, null, 2))
         } else {
-          console.log(formatChildJobs(target.children, { color: useColor() }))
+          console.log(
+            formatChildJobs(term().deep(target.children), {
+              color: useColor(),
+            }),
+          )
         }
         return
       }
       if (jsonFlag) {
         console.log(JSON.stringify(target.builds, null, 2))
       } else {
-        console.log(formatBuildList(target.builds, { pretty: useColor() }))
+        console.log(
+          formatBuildList(term().deep(target.builds), { pretty: useColor() }),
+        )
       }
     } catch (e) {
       formatError(e)
@@ -773,25 +807,35 @@ program
       }
       if (!cmd.output) {
         console.log(
-          list
+          term()
+            .deep(list)
             .map((a) => `${a.fileName}\t${a.relativePath}\t${a.size || ""}`)
             .join("\n"),
         )
         return
       }
       const fs = await import("fs")
-      const path = await import("path")
       fs.mkdirSync(cmd.output, { recursive: true })
+      let refused = 0
       for (const a of list) {
+        // The name comes from the server: keep the file inside --output.
+        let outFile: string
+        try {
+          outFile = safeArtifactPath(cmd.output, a.fileName)
+        } catch (err) {
+          console.error(term().text(err.message))
+          refused++
+          continue
+        }
         const buf = await client.downloadArtifact(
           job,
           build.number,
           a.relativePath,
         )
-        const outFile = path.join(cmd.output, a.fileName)
         fs.writeFileSync(outFile, buf)
-        console.log(`Saved ${outFile}`)
+        console.log(`Saved ${term().text(outFile)}`)
       }
+      if (refused) process.exitCode = 1
     } catch (e) {
       formatError(e)
       process.exit(1)
@@ -805,22 +849,14 @@ program
     try {
       const spec = parseBuildSpecifier(jobOrUrl)
       const client = await getClient()
-      const base = client.baseUrl.replace(/\/$/, "")
       const num = buildNumber || spec.buildNumber
-      let url
-      if (num) {
-        url = `${base}/job/${encodeURIComponent(spec.job)}/${num}/`
-      } else {
-        url = `${base}/job/${encodeURIComponent(spec.job)}/`
-      }
-      const { exec } = await import("child_process")
-      const opener =
-        process.platform === "darwin"
-          ? "open"
-          : process.platform === "win32"
-            ? "start"
-            : "xdg-open"
-      exec(`${opener} "${url}"`)
+      const url = buildOpenUrl(client.baseUrl, spec.job, num)
+      // execFile, not exec: the URL is one argv entry and no shell parses it.
+      const { execFile } = await import("child_process")
+      const [opener, args] = openerCommand(process.platform, url)
+      execFile(opener, args, (err) => {
+        if (err) console.error(`Could not launch ${opener}: ${err.message}`)
+      })
       console.log(url)
     } catch (e) {
       formatError(e)
@@ -883,7 +919,7 @@ program
       if (program.opts().json) {
         console.log(JSON.stringify(jobs, null, 2))
       } else {
-        console.log(formatJobList(jobs, { color: useColor() }))
+        console.log(formatJobList(term().deep(jobs), { color: useColor() }))
       }
     } catch (e) {
       formatError(e)
